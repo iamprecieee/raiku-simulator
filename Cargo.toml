@@ -1,0 +1,28 @@
+[package]
+name = "raiku-simulator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.100"
+axum = "0.8.4"
+chrono = { version = "0.4.42", features = ["serde"] }
+dashmap = "6.1.0"
+dotenv = "0.15.0"
+futures-util = "0.3.31"
+rand = "0.9.2"
+serde = { version = "1.0.226", features = ["derive"] }
+serde_json = "1.0.145"
+tokio = { version = "1.47.1", features = ["full"] }
+tower-http = { version = "0.6.6", features = ["cors"] }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.20"
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
+
+[[bin]]
+name = "raiku_simulator"
+path = "src/main.rs"
+
+[lib]
+name = "raiku_simulator"
+path = "src/lib.rs"
