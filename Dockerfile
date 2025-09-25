@@ -16,7 +16,7 @@ RUN cargo build --release
 
 FROM gcr.io/distroless/cc-debian12
 
-COPY --from=builder /app/target/release/raiko-simulator /app
+COPY --from=builder /app/target/release/raiku-simulator /app
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
