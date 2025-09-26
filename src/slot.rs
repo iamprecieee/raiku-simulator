@@ -134,15 +134,6 @@ impl SlotMarketplace {
             self.slots.insert(furthest_slot, slot);
         }
     }
-
-    pub fn get_next_available_slot(&self) -> Option<u64> {
-        (self.current_slot..self.current_slot + 100).find(|&slot_num| {
-            self.slots
-                .get(&slot_num)
-                .map(|s| s.is_available())
-                .unwrap_or(false)
-        })
-    }
 }
 
 fn calculate_base_fee() -> f64 {

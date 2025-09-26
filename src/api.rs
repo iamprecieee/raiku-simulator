@@ -257,9 +257,7 @@ async fn submit_jit_transaction(
 ) -> Result<Json<Value>, StatusCode> {
     let next_slot = {
         let marketplace = context.state.marketplace.read().await;
-        marketplace
-            .get_next_available_slot()
-            .ok_or(StatusCode::SERVICE_UNAVAILABLE)?
+        marketplace.current_slot + 1
     };
 
     if !context.state.auctions.read().await.jit_auctions.contains_key(&next_slot) {
