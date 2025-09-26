@@ -3,3 +3,5 @@ Cargo.lock
 *.log
 .vscode/
 .env
+node_modules/
+/build
