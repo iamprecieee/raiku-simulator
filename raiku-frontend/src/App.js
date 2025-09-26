@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Zap, ChevronDown } from 'lucide-react';
+import { Zap, ChevronDown, ChevronLeft, ChevronRight, Users, User } from 'lucide-react';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8080';
 
@@ -10,6 +10,16 @@ const RaikuSimulator = () => {
   const [jitAuctions, setJitAuctions] = useState([]);
   const [aotAuctions, setAotAuctions] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [showAllTransactions, setShowAllTransactions] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    current_page: 1,
+    total_pages: 1,
+    page_size: 20,
+    total_count: 0,
+    has_next: false,
+    has_prev: false
+  });
   const [activeTab, setActiveTab] = useState('marketplace');
   const [notifications, setNotifications] = useState([]);
   const [isMobile, setIsMobile] = useState(false);
@@ -20,7 +30,6 @@ const RaikuSimulator = () => {
     active_aot_auctions: 0,
     total_transactions: 0
   });
-
   const eventSourceRef = useRef(null);
   const notificationIdRef = useRef(0);
 
@@ -41,41 +50,49 @@ const RaikuSimulator = () => {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 3000);
   }, []);
-
-  const connectEventSource = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
+  
+  const fetchJitAuctions = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/auctions/jit`);
+      const data = await response.json();
+      setJitAuctions(data.auctions || []);
+    } catch (error) {
+      console.error('Failed to fetch JIT auctions:', error);
     }
+  }, []);
 
-    const eventSource = new EventSource(`${API_BASE}/events`);
-    eventSourceRef.current = eventSource;
+  const fetchAotAuctions = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/auctions/aot`);
+      const data = await response.json();
+      setAotAuctions(data.auctions || []);
+    } catch (error) {
+      console.error('Failed to fetch AOT auctions:', error);
+    }
+  }, []);
 
-    eventSource.onopen = () => {
-      setConnectionStatus('connected');
-      addNotification('Real-time connection established!', 'success');
-    };
+  const fetchTransactions = useCallback(async (page = 1) => {
+    if (!sessionId) return;
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        handleEvent(data);
-      } catch (error) {
-        console.error('Failed to parse event data:', error);
+    try {
+      let url;
+      if (showAllTransactions) {
+        url = `${API_BASE}/transactions/all?page=${page}&limit=20`;
+      } else {
+        url = `${API_BASE}/transactions?session_id=${sessionId}&page=${page}&limit=20`;
       }
-    };
-
-    eventSource.onerror = () => {
-      setConnectionStatus('error');
-      setTimeout(() => {
-        if (sessionId) {
-          connectEventSource();
-        }
-      }, 3000);
-    };
-
-    return eventSource;
-  }, [sessionId, addNotification]);
-
+      
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      setTransactions(data.transactions || []);
+      setPagination(data.pagination);
+      setCurrentPage(page);
+    } catch (error) {
+      console.error('Failed to fetch transactions:', error);
+    }
+  }, [sessionId, showAllTransactions]);
+  
   const handleEvent = useCallback((event) => {
     switch (event.type) {
       case 'SlotAdvanced':
@@ -134,7 +151,42 @@ const RaikuSimulator = () => {
       default:
         break;
     }
-  }, [sessionId, addNotification]);
+  }, [sessionId, addNotification, fetchAotAuctions, fetchJitAuctions]);
+  
+  const connectEventSource = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    const eventSource = new EventSource(`${API_BASE}/events`);
+    eventSourceRef.current = eventSource;
+
+    eventSource.onopen = () => {
+      setConnectionStatus('connected');
+      addNotification('Real-time connection established!', 'success');
+    };
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        handleEvent(data);
+      } catch (error) {
+        console.error('Failed to parse event data:', error);
+      }
+    };
+
+    eventSource.onerror = () => {
+      setConnectionStatus('error');
+      setTimeout(() => {
+        if (sessionId) {
+          connectEventSource();
+        }
+      }, 3000);
+    };
+
+    return eventSource;
+  }, [sessionId, addNotification, handleEvent]);
+
 
   const createSession = useCallback(async () => {
     try {
@@ -191,54 +243,30 @@ const RaikuSimulator = () => {
     }
   }, [sessionId]);
 
-  const fetchJitAuctions = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE}/auctions/jit`);
-      const data = await response.json();
-      setJitAuctions(data.auctions || []);
-    } catch (error) {
-      console.error('Failed to fetch JIT auctions:', error);
-    }
-  }, []);
-
-  const fetchAotAuctions = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE}/auctions/aot`);
-      const data = await response.json();
-      setAotAuctions(data.auctions || []);
-    } catch (error) {
-      console.error('Failed to fetch AOT auctions:', error);
-    }
-  }, []);
-
-  const fetchTransactions = useCallback(async () => {
-    if (!sessionId) return;
-    
-    try {
-      const response = await fetch(`${API_BASE}/transactions?session_id=${sessionId}`);
-      const data = await response.json();
-      setTransactions(data.transactions || []);
-    } catch (error) {
-      console.error('Failed to fetch transactions:', error);
-    }
-  }, [sessionId]);
 
   useEffect(() => {
     createSession();
   }, [createSession]);
-
+    
   useEffect(() => {
     if (sessionId) {
       fetchInitialData();
       connectEventSource();
     }
-
+    
     return () => {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
       }
     };
+    
   }, [sessionId, fetchInitialData, connectEventSource]);
+
+  useEffect(() => {
+    if (activeTab === 'transactions' && sessionId) {
+      fetchTransactions(1);
+    }
+  }, [activeTab, sessionId, showAllTransactions, fetchTransactions]);
 
   const submitJitBid = async () => {
     const bidAmount = parseFloat(prompt('Enter JIT bid amount (SOL):') || '0');
@@ -327,6 +355,17 @@ const RaikuSimulator = () => {
     return 'Standard';
   };
 
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= pagination.total_pages) {
+      fetchTransactions(newPage);
+    }
+  };
+    
+  const toggleTransactionView = () => {
+    setShowAllTransactions(!showAllTransactions);
+    setCurrentPage(1);
+  };
+
   if (!sessionId) {
     return (
       <div style={{
@@ -356,7 +395,7 @@ const RaikuSimulator = () => {
         }}>
           Creating Your Raiku Session...
         </h2>
-        <style jsx>{`
+        <style>{`
           @keyframes spin {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
@@ -716,7 +755,7 @@ const RaikuSimulator = () => {
                         boxShadow: '0 2px 4px rgba(40, 40, 40, 0.7)'
                       }}
                       onClick={() => {
-                        if (slot.slot_number >= currentSlot + 1 && slot.state === 'Available' || (typeof slot.state === 'object' && slot.state.AoTAuction)) {
+                        if ((slot.slot_number >= currentSlot + 1 && slot.state === 'Available') || (typeof slot.state === 'object' && slot.state.AoTAuction)) {
                           submitAotBid(slot.slot_number);
                         }
                       }}
@@ -1014,129 +1053,249 @@ const RaikuSimulator = () => {
         )}
 
         {activeTab === 'transactions' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '24px' : '34px' }}>
-            <div style={{ textAlign: 'center', animation: 'bubbleAppear 1s ease-in-out' }}>
-              <h2 style={{
-                color: 'rgb(169, 56, 56)',
-                fontWeight: 'bolder',
-                textTransform: 'uppercase',
-                fontSize: isMobile ? '35px' : '51px',
-                margin: '0 0 10px 0'
-              }}>
-                My Transactions
-              </h2>
-              <p style={{
-                color: 'rgb(169, 56, 56)',
-                fontWeight: 'bold',
-                fontSize: isMobile ? '20px' : '30px',
-                margin: '0'
-              }}>
-                Track your auction bids and inclusion status
-              </p>
-            </div>
-
-            <div style={{
-              backgroundColor: 'rgb(252, 217, 157)',
-              borderRadius: '10px',
-              boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
-              animation: 'bubbleAppear 0.5s ease-in-out'
-            }}>
-              <div style={{
-                padding: isMobile ? '17px' : '26px',
-                borderBottom: '3px solid rgb(169, 56, 56)',
-                textAlign: 'center'
-              }}>
-                <h3 style={{
-                  color: 'rgb(169, 56, 56)',
-                  fontWeight: 'bolder',
-                  textTransform: 'uppercase',
-                  margin: '0',
-                  fontSize: isMobile ? '28px' : '39px'
-                }}>
-                  Transaction History
-                </h3>
-              </div>
-              <div style={{ padding: isMobile ? '17px' : '26px' }}>
-                {transactions.length === 0 ? (
-                  <div style={{
-                    textAlign: 'center',
+              <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '24px' : '34px' }}>
+                <div style={{ textAlign: 'center', animation: 'bubbleAppear 1s ease-in-out' }}>
+                  <h2 style={{
+                    color: 'rgb(169, 56, 56)',
+                    fontWeight: 'bolder',
+                    textTransform: 'uppercase',
+                    fontSize: isMobile ? '35px' : '51px',
+                    margin: '0 0 10px 0'
+                  }}>
+                    Transaction History
+                  </h2>
+                  <p style={{
                     color: 'rgb(169, 56, 56)',
                     fontWeight: 'bold',
-                    textTransform: 'uppercase',
-                    padding: isMobile ? '24px' : '34px',
-                    fontSize: isMobile ? '20px' : '23px'
+                    fontSize: isMobile ? '20px' : '30px',
+                    margin: '0'
                   }}>
-                    No transactions yet. Submit some bids!
-                  </div>
-                ) : (
-                  transactions.map(tx => (
-                    <div key={tx.id} style={{
-                      backgroundColor: '#297cb3',
-                      borderRadius: '5px',
-                      boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
-                      padding: isMobile ? '17px' : '20px',
-                      marginBottom: isMobile ? '12px' : '17px'
-                    }}>
-                      <div style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: '12px',
-                        flexWrap: 'wrap',
-                        gap: '8px'
-                      }}>
-                        <span style={{
-                          color: '#75bd4f',
-                          fontWeight: 'bold',
-                          fontSize: isMobile ? '16px' : '18px'
-                        }}>
-                          {tx.id.slice(0, 8)}...
-                        </span>
-                        <span style={{
-                          padding: '4px 12px',
-                          borderRadius: '3px',
-                          fontSize: isMobile ? '12px' : '14px',
-                          fontWeight: 'bold',
-                          textTransform: 'uppercase',
-                          backgroundColor: 
-                            getTransactionStatus(tx.status) === 'Included' ? '#75bd4f' :
-                            getTransactionStatus(tx.status) === 'Auction Won' ? '#d97706' :
-                            getTransactionStatus(tx.status) === 'Failed' ? '#dc2626' : '#666',
-                          color: 'rgb(252, 217, 157)'
-                        }}>
-                          {getTransactionStatus(tx.status)}
-                        </span>
-                      </div>
-                      <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
-                        gap: '8px',
-                        fontSize: isMobile ? '14px' : '16px',
-                        color: 'rgb(252, 217, 157)'
-                      }}>
-                        <div>
-                          <strong>Type:</strong> {getTransactionType(tx.inclusion_type)}
-                        </div>
-                        <div>
-                          <strong>Fee:</strong> {tx.priority_fee} SOL
-                        </div>
-                        <div>
-                          <strong>Compute Units:</strong> {tx.compute_units}
-                        </div>
-                        <div>
-                          <strong>Created:</strong> {new Date(tx.created_at).toLocaleTimeString()}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+                    Track auction bids and inclusion status
+                  </p>
+                </div>
 
-      <style jsx>{`
+                <div style={{
+                  backgroundColor: 'rgb(252, 217, 157)',
+                  borderRadius: '10px',
+                  boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
+                  animation: 'bubbleAppear 0.5s ease-in-out'
+                }}>
+                  <div style={{
+                    padding: isMobile ? '17px' : '26px',
+                    borderBottom: '3px solid rgb(169, 56, 56)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                  }}>
+                    <h3 style={{
+                      color: 'rgb(169, 56, 56)',
+                      fontWeight: 'bolder',
+                      textTransform: 'uppercase',
+                      margin: '0',
+                      fontSize: isMobile ? '24px' : '32px'
+                    }}>
+                      {showAllTransactions ? 'All Transactions' : 'My Transactions'}
+                    </h3>
+                    
+                    <button
+                      onClick={toggleTransactionView}
+                      style={{
+                        backgroundColor: showAllTransactions ? '#75bd4f' : '#297cb3',
+                        color: 'rgb(252, 217, 157)',
+                        padding: isMobile ? '8px 12px' : '10px 16px',
+                        border: 'none',
+                        borderRadius: '5px',
+                        fontWeight: 'bold',
+                        textTransform: 'uppercase',
+                        cursor: 'pointer',
+                        fontFamily: 'monospace',
+                        boxShadow: '0 2px 4px rgba(40, 40, 40, 0.7)',
+                        fontSize: isMobile ? '12px' : '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        transition: 'transform 0.3s ease'
+                      }}
+                      onMouseEnter={(e) => e.target.style.transform = 'scale(1.05)'}
+                      onMouseLeave={(e) => e.target.style.transform = 'scale(1)'}
+                    >
+                      {showAllTransactions ? <Users size={16} /> : <User size={16} />}
+                      {showAllTransactions ? 'Show Mine' : 'Show All'}
+                    </button>
+                  </div>
+                  
+                  <div style={{ padding: isMobile ? '17px' : '26px' }}>
+                    {transactions.length === 0 ? (
+                      <div style={{
+                        textAlign: 'center',
+                        color: 'rgb(169, 56, 56)',
+                        fontWeight: 'bold',
+                        textTransform: 'uppercase',
+                        padding: isMobile ? '24px' : '34px',
+                        fontSize: isMobile ? '20px' : '23px'
+                      }}>
+                        {showAllTransactions ? 'No transactions in the system yet!' : 'No transactions yet. Submit some bids!'}
+                      </div>
+                    ) : (
+                      <>
+                        {transactions.map(tx => (
+                          <div key={tx.id} style={{
+                            backgroundColor: '#297cb3',
+                            borderRadius: '5px',
+                            boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
+                            padding: isMobile ? '17px' : '20px',
+                            marginBottom: isMobile ? '12px' : '17px'
+                          }}>
+                            <div style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              marginBottom: '12px',
+                              flexWrap: 'wrap',
+                              gap: '8px'
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{
+                                  color: '#75bd4f',
+                                  fontWeight: 'bold',
+                                  fontSize: isMobile ? '16px' : '18px'
+                                }}>
+                                  {tx.id.slice(0, 8)}...
+                                </span>
+                                {showAllTransactions && (
+                                  <span style={{
+                                    fontSize: isMobile ? '12px' : '14px',
+                                    color: 'rgb(252, 217, 157)',
+                                    backgroundColor: tx.sender === sessionId ? '#d97706' : 'rgba(252, 217, 157, 0.2)',
+                                    padding: '2px 6px',
+                                    borderRadius: '3px',
+                                    fontWeight: 'bold'
+                                  }}>
+                                    {tx.sender === sessionId ? 'YOU' : tx.sender.slice(0, 6) + '...'}
+                                  </span>
+                                )}
+                              </div>
+                              <span style={{
+                                padding: '4px 12px',
+                                borderRadius: '3px',
+                                fontSize: isMobile ? '12px' : '14px',
+                                fontWeight: 'bold',
+                                textTransform: 'uppercase',
+                                backgroundColor: 
+                                  getTransactionStatus(tx.status) === 'Included' ? '#75bd4f' :
+                                  getTransactionStatus(tx.status) === 'Auction Won' ? '#d97706' :
+                                  getTransactionStatus(tx.status) === 'Failed' ? '#dc2626' : '#666',
+                                color: 'rgb(252, 217, 157)'
+                              }}>
+                                {getTransactionStatus(tx.status)}
+                              </span>
+                            </div>
+                            <div style={{
+                              display: 'grid',
+                              gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr',
+                              gap: '8px',
+                              fontSize: isMobile ? '14px' : '16px',
+                              color: 'rgb(252, 217, 157)'
+                            }}>
+                              <div>
+                                <strong>Type:</strong> {getTransactionType(tx.inclusion_type)}
+                              </div>
+                              <div>
+                                <strong>Fee:</strong> {tx.priority_fee} SOL
+                              </div>
+                              <div>
+                                <strong>Compute Units:</strong> {tx.compute_units}
+                              </div>
+                              <div>
+                                <strong>Created:</strong> {new Date(tx.created_at).toLocaleTimeString()}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        
+                        {/* Pagination Controls */}
+                        {pagination.total_pages > 1 && (
+                          <div style={{
+                            display: 'flex',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            gap: '12px',
+                            marginTop: '20px',
+                            flexWrap: 'wrap'
+                          }}>
+                            <button
+                              onClick={() => handlePageChange(currentPage - 1)}
+                              disabled={!pagination.has_prev}
+                              style={{
+                                backgroundColor: pagination.has_prev ? '#297cb3' : '#666',
+                                color: 'rgb(252, 217, 157)',
+                                border: 'none',
+                                borderRadius: '5px',
+                                padding: '8px 12px',
+                                cursor: pagination.has_prev ? 'pointer' : 'not-allowed',
+                                fontFamily: 'monospace',
+                                fontWeight: 'bold',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <ChevronLeft size={16} />
+                              Prev
+                            </button>
+                            
+                            <div style={{
+                              color: 'rgb(169, 56, 56)',
+                              fontWeight: 'bold',
+                              fontSize: isMobile ? '14px' : '16px',
+                              padding: '0 12px'
+                            }}>
+                              {currentPage} of {pagination.total_pages}
+                            </div>
+                            
+                            <button
+                              onClick={() => handlePageChange(currentPage + 1)}
+                              disabled={!pagination.has_next}
+                              style={{
+                                backgroundColor: pagination.has_next ? '#297cb3' : '#666',
+                                color: 'rgb(252, 217, 157)',
+                                border: 'none',
+                                borderRadius: '5px',
+                                padding: '8px 12px',
+                                cursor: pagination.has_next ? 'pointer' : 'not-allowed',
+                                fontFamily: 'monospace',
+                                fontWeight: 'bold',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              Next
+                              <ChevronRight size={16} />
+                            </button>
+                          </div>
+                        )}
+                        
+                        <div style={{
+                          textAlign: 'center',
+                          marginTop: '12px',
+                          color: 'rgb(169, 56, 56)',
+                          fontSize: isMobile ? '12px' : '14px',
+                          fontWeight: 'bold'
+                        }}>
+                          Showing {transactions.length} of {pagination.total_count} transactions
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+      <style>{`
         @keyframes fadeIn {
           from {
             opacity: 0;

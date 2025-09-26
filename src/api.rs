@@ -53,6 +53,20 @@ pub struct AotBidRequest {
     data: String,
 }
 
+#[derive(Deserialize)]
+pub struct TransactionQuery {
+    session_id: Option<String>,
+    page: Option<u32>,
+    limit: Option<u32>,
+    show_all: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct TransactionBatchQuery {
+    page: Option<u32>,
+    limit: Option<u32>,
+}
+
 pub fn create_api_router(context: AppContext) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(
@@ -87,6 +101,7 @@ pub fn create_api_router(context: AppContext) -> Router {
         .route("/transactions/jit", post(submit_jit_transaction))
         .route("/transactions/aot", post(submit_aot_transaction))
         .route("/transactions", get(list_transactions))
+        .route("/transactions/all", get(list_all_transactions))
         .route("/transactions/{transaction_id}", get(get_transaction))
         .route("/health", get(health_check))
         .layer(axum::middleware::from_fn(rate_limit_middleware))
@@ -366,17 +381,78 @@ async fn submit_aot_transaction(
 
 async fn list_transactions(
     State(context): State<AppContext>,
-    Query(query): Query<SessionQuery>,
-) -> Json<Value> {
-    let transactions = context
-        .state
-        .get_session_transactions(&query.session_id)
-        .await;
+    Query(query): Query<TransactionQuery>,
+) -> Result<Json<Value>, StatusCode>  {
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = query.limit.unwrap_or(20).min(100).max(1);
+    let offset = (page - 1) * limit;
+    
+    if query.show_all.unwrap_or(false) {
+        let all_transactions = context.state.get_all_transactions_paginated(offset, limit).await;
+        let total_count = context.state.get_total_transaction_count().await;
+        let total_pages = (total_count + limit - 1) / limit;
+        
+        return Ok(Json(json!({
+            "transactions": all_transactions,
+            "pagination": {
+                "current_page": page,
+                "total_pages": total_pages,
+                "page_size": limit,
+                "total_count": total_count,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            },
+            "session_id": query.session_id,
+            "showing": "all"
+        })));
+    }
 
+    let session_id = query.session_id.ok_or(StatusCode::BAD_REQUEST)?;
+    let session_transactions = context
+        .state
+        .get_session_transactions_paginated(&session_id, offset, limit)
+        .await;
+    let total_count = context.state.get_session_transaction_count(&session_id).await;
+    let total_pages = (total_count + limit - 1) / limit;
+
+    Ok(Json(json!({
+        "session_id": session_id,
+        "transactions": session_transactions,
+        "pagination": {
+            "current_page": page,
+            "total_pages": total_pages,
+            "page_size": limit,
+            "total_count": total_count,
+            "has_next": page < total_pages,
+            "has_prev": page > 1
+        },
+        "showing": "session_only"
+    })))
+}
+
+async fn list_all_transactions(
+    State(context): State<AppContext>,
+    Query(query): Query<TransactionBatchQuery>,
+) -> Json<Value> {
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = query.limit.unwrap_or(20).min(100).max(1);
+    let offset = (page - 1) * limit;
+    
+    let all_transactions = context.state.get_all_transactions_paginated(offset, limit).await;
+    let total_count = context.state.get_total_transaction_count().await;
+    let total_pages = (total_count + limit - 1) / limit;
+    
     Json(json!({
-        "session_id": query.session_id,
-        "transactions": transactions,
-        "count": transactions.len()
+        "transactions": all_transactions,
+        "pagination": {
+            "current_page": page,
+            "total_pages": total_pages,
+            "page_size": limit,
+            "total_count": total_count,
+            "has_next": page < total_pages,
+            "has_prev": page > 1
+        },
+        "showing": "all"
     }))
 }
 
