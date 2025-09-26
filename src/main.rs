@@ -155,8 +155,8 @@ async fn update_transaction_status(
         if transaction.inclusion_type == inclusion_type
             && matches!(transaction.status, TransactionStatus::Pending)
         {
-            transaction.mark_auction_won(slot, winning_bid);
             transaction.mark_included(slot);
+            transaction.mark_auction_won(slot, winning_bid);
 
             state
                 .update_transaction(&transaction.id, transaction.clone())
