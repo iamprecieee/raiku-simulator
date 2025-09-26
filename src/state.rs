@@ -77,7 +77,7 @@ impl AppState {
         self.events.broadcast(AppEvent::TransactionUpdated { transaction });
     }
 
-    pub async fn advance_slot(&self) {
+    pub async fn advance_slot(&self) -> u64 {
         let current_slot = {
             let mut marketplace = self.marketplace.write().await;
             marketplace.advance_slot();
@@ -97,6 +97,7 @@ impl AppState {
 
         self.events.broadcast(AppEvent::SlotsUpdated { slots });
         self.broadcast_stats().await;
+        current_slot
     }
 
     pub async fn get_current_slot(&self) -> u64 {
@@ -205,10 +206,10 @@ impl AppState {
         result
     }
 
-    pub async fn resolve_ended_aot_auctions(&self) -> Vec<(u64, String, f64)> {
+    pub async fn resolve_ready_aot_auctions(&self, current_slot: u64) -> Vec<(u64, String, f64)> {
         let results = {
             let mut auctions = self.auctions.write().await;
-            auctions.resolve_ended_aot()
+            auctions.resolve_ready_aot(current_slot)
         };
 
         for (slot_number, winner, winning_bid) in &results {

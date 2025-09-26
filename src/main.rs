@@ -25,7 +25,6 @@ async fn main() -> anyhow::Result<()> {
     let rate_limiter = RateLimiter::new(100);
 
     let slot_state = state.clone();
-    let auction_state = state.clone();
     let session_state = state.clone();
 
     tokio::spawn(async move {
@@ -35,9 +34,70 @@ async fn main() -> anyhow::Result<()> {
 
         loop {
             interval.tick().await;
-            slot_state.advance_slot().await;
+            let current_slot = slot_state.advance_slot().await;
 
-            let current_slot = slot_state.get_current_slot().await;
+            if let Some((winner, bid)) = slot_state.resolve_jit_auction(current_slot).await {
+                tracing::info!(
+                    "JIT auction resolved - Slot: {}, Winner: {}, Bid: {} SOL",
+                    current_slot,
+                    winner.chars().take(8).collect::<String>(),
+                    bid
+                );
+
+                if let Some(slot_obj) = slot_state
+                    .marketplace
+                    .write()
+                    .await
+                    .slots
+                    .get_mut(&current_slot)
+                {
+                    slot_obj.reserve(winner.clone(), bid, TransactionType::JiT);
+                    slot_obj.fill(
+                        winner.clone(),
+                        format!("transaction_{}", current_slot),
+                        200_000,
+                    );
+                }
+
+                update_transaction_status(
+                    &slot_state,
+                    &winner,
+                    current_slot,
+                    bid,
+                    InclusionType::JiT,
+                )
+                .await;
+            }
+
+            let resolved_aot = slot_state.resolve_ready_aot_auctions(current_slot).await;
+            for (slot, winner, bid) in resolved_aot {
+                tracing::info!(
+                    "AOT auction resolved - Slot: {}, Winner: {}, Bid: {} SOL",
+                    slot,
+                    winner.chars().take(8).collect::<String>(),
+                    bid
+                );
+
+                if let Some(slot_obj) = slot_state
+                    .marketplace
+                    .write()
+                    .await
+                    .slots
+                    .get_mut(&slot)
+                {
+                    slot_obj.reserve(winner.clone(), bid, TransactionType::AoT);
+                }
+
+                update_transaction_status(
+                    &slot_state,
+                    &winner,
+                    slot,
+                    bid,
+                    InclusionType::AoT { reserved_slot: slot },
+                )
+                .await;
+            }
+
             if current_slot % 10 == 0 {
                 tracing::info!("Current slot: {}", current_slot);
             }
@@ -54,79 +114,6 @@ async fn main() -> anyhow::Result<()> {
             let session_count = session_state.sessions.get_session_count().await;
             if session_count > 0 {
                 tracing::info!("Active sessions: {}", session_count);
-            }
-        }
-    });
-
-    tokio::spawn(async move {
-        let mut interval = interval(Duration::from_millis(
-            config.marketplace.slot_time_ms as u64,
-        ));
-
-        loop {
-            interval.tick().await;
-            let current_slot = auction_state.get_current_slot().await;
-
-            if let Some((winner, bid)) = auction_state.resolve_jit_auction(current_slot).await {
-                tracing::info!(
-                    "JIT auction resolved - Slot: {}, Winner: {}, Bid: {} SOL",
-                    current_slot,
-                    winner.chars().take(8).collect::<String>(),
-                    bid
-                );
-
-                if let Some(slot_obj) = auction_state
-                    .marketplace
-                    .write()
-                    .await
-                    .slots
-                    .get_mut(&current_slot)
-                {
-                    slot_obj.reserve(winner.clone(), bid, TransactionType::JiT);
-                    slot_obj.fill(
-                        winner.clone(),
-                        format!("transaction_{}", current_slot),
-                        200_000,
-                    );
-                }
-
-                update_transaction_status(
-                    &auction_state,
-                    &winner,
-                    current_slot,
-                    bid,
-                    InclusionType::JiT,
-                )
-                .await;
-            }
-
-            let resolved_aot = auction_state.resolve_ended_aot_auctions().await;
-            for (slot, winner, bid) in resolved_aot {
-                tracing::info!(
-                    "AOT auction resolved - Slot: {}, Winner: {}, Bid: {} SOL",
-                    slot,
-                    winner.chars().take(8).collect::<String>(),
-                    bid
-                );
-
-                if let Some(slot_obj) = auction_state
-                    .marketplace
-                    .write()
-                    .await
-                    .slots
-                    .get_mut(&slot)
-                {
-                    slot_obj.reserve(winner.clone(), bid, TransactionType::AoT);
-                }
-
-                update_transaction_status(
-                    &auction_state,
-                    &winner,
-                    slot,
-                    bid,
-                    InclusionType::AoT { reserved_slot: slot },
-                )
-                .await;
             }
         }
     });

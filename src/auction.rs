@@ -121,11 +121,11 @@ impl AoTAuction {
         Utc::now() > self.ends_at
     }
 
-    pub fn resolve(&self) -> Option<(String, f64)> {
-        if !self.has_ended() {
-            return None;
-        }
+    pub fn should_resolve(&self, current_slot: u64) -> bool {
+        self.has_ended() || self.slot_number <= current_slot
+    }
 
+    pub fn resolve(&self) -> Option<(String, f64)> {
         self.get_highest_bid()
             .map(|(bidder, amount, _)| (bidder.clone(), *amount))
     }
@@ -210,16 +210,16 @@ impl AuctionManager {
             .and_then(|a| a.resolve())
     }
 
-    pub fn resolve_ended_aot(&mut self) -> Vec<(u64, String, f64)> {
+    pub fn resolve_ready_aot(&mut self, current_slot: u64) -> Vec<(u64, String, f64)> {
         let mut resolved = Vec::new();
-        let ended_slots: Vec<u64> = self
+        let ready_slots: Vec<u64> = self
             .aot_auctions
             .iter()
-            .filter(|(_, auction)| auction.has_ended())
+            .filter(|(_, auction)| auction.should_resolve(current_slot))
             .map(|(slot, _)| *slot)
             .collect();
 
-        for slot in ended_slots {
+        for slot in ready_slots {
             if let Some(auction) = self.aot_auctions.remove(&slot) {
                 if let Some((winner, bid)) = auction.resolve() {
                     resolved.push((slot, winner, bid));
