@@ -64,8 +64,51 @@ impl AppState {
             .collect()
     }
 
+    pub async fn get_session_transactions_paginated(&self, session_id: &str, offset: u32, limit: u32) -> Vec<Transaction> {
+        let session_transactions = self.session_transactions.read().await;
+        let transaction_ids = session_transactions
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default();
+
+        let transactions = self.transactions.read().await;
+        
+        transaction_ids
+            .iter()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .filter_map(|id| transactions.get(id).cloned())
+            .collect()
+    }
+
+    pub async fn get_session_transaction_count(&self, session_id: &str) -> u32 {
+        let session_transactions = self.session_transactions.read().await;
+        session_transactions
+            .get(session_id)
+            .map(|ids| ids.len() as u32)
+            .unwrap_or(0)
+    }
+
     pub async fn get_transaction(&self, transaction_id: &str) -> Option<Transaction> {
         self.transactions.read().await.get(transaction_id).cloned()
+    }
+
+    pub async fn get_all_transactions_paginated(&self, offset: u32, limit: u32) -> Vec<Transaction> {
+        let transactions = self.transactions.read().await;
+        
+        let mut all_transactions: Vec<Transaction> = transactions.values().cloned().collect();
+        
+        all_transactions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        
+        all_transactions
+            .into_iter()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .collect()
+    }
+
+    pub async fn get_total_transaction_count(&self) -> u32 {
+        self.transactions.read().await.len() as u32
     }
 
     pub async fn update_transaction(&self, transaction_id: &str, transaction: Transaction) {
