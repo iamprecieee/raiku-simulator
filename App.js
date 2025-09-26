@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Zap, ChevronDown } from 'lucide-react';
 
-const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8080';
+const API_BASE = 'http://localhost:8080';
 
 const RaikuSimulator = () => {
   const [sessionId, setSessionId] = useState(null);
@@ -22,7 +22,6 @@ const RaikuSimulator = () => {
   });
 
   const eventSourceRef = useRef(null);
-  const notificationIdRef = useRef(0);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -35,11 +34,11 @@ const RaikuSimulator = () => {
   }, []);
 
   const addNotification = useCallback((message, type = 'info') => {
-    const id = ++notificationIdRef.current;
+    const id = Date.now();
     setNotifications(prev => [...prev, { id, message, type }]);
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 3000);
+    }, 5000);
   }, []);
 
   const connectEventSource = useCallback(() => {
@@ -716,7 +715,7 @@ const RaikuSimulator = () => {
                         boxShadow: '0 2px 4px rgba(40, 40, 40, 0.7)'
                       }}
                       onClick={() => {
-                        if (slot.slot_number >= currentSlot + 1 && slot.state === 'Available' || (typeof slot.state === 'object' && slot.state.AoTAuction)) {
+                        if (slot.slot_number >= currentSlot + 35 && slot.state === 'Available') {
                           submitAotBid(slot.slot_number);
                         }
                       }}
