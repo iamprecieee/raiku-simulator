@@ -1,4 +1,8 @@
-use std::{sync::Arc, time::{Duration, Instant}, net::SocketAddr};
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use axum::{
     extract::ConnectInfo,
@@ -38,13 +42,16 @@ impl RateLimiter {
 
     pub fn check_rate_limit(&self, client_key: &str) -> bool {
         let now = Instant::now();
-        
-        let mut entry = self.buckets.entry(client_key.to_string()).or_insert(TokenBucket {
-            tokens: self.requests_per_window,
-            last_refill: now,
-            window_start: now,
-            request_count: 0,
-        });
+
+        let mut entry = self
+            .buckets
+            .entry(client_key.to_string())
+            .or_insert(TokenBucket {
+                tokens: self.requests_per_window,
+                last_refill: now,
+                window_start: now,
+                request_count: 0,
+            });
 
         if now.duration_since(entry.window_start) >= self.window_duration {
             entry.window_start = now;
@@ -73,7 +80,7 @@ pub async fn rate_limit_middleware(
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let client_key = rate_limiter.get_client_key(&addr);
-    
+
     if !rate_limiter.check_rate_limit(&client_key) {
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }

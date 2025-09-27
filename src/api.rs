@@ -13,10 +13,10 @@ use serde_json::{json, Value};
 use tower_http::cors::CorsLayer;
 
 use crate::{
-    config::Config, 
-    rate_limiter::{rate_limit_middleware, RateLimiter}, 
-    state::AppState, 
-    transaction::Transaction
+    config::Config,
+    rate_limiter::{rate_limit_middleware, RateLimiter},
+    state::AppState,
+    transaction::Transaction,
 };
 
 #[derive(Clone)]
@@ -112,7 +112,7 @@ pub fn create_api_router(context: AppContext) -> Router {
 
 async fn create_or_validate_session(
     State(context): State<AppContext>,
-    Json(req): Json<SessionRequest>
+    Json(req): Json<SessionRequest>,
 ) -> Json<Value> {
     if let Some(session_id) = req.session_id {
         if let Some(session) = context.state.sessions.get_session(&session_id).await {
@@ -124,7 +124,7 @@ async fn create_or_validate_session(
             }));
         }
     }
-    
+
     let session = context.state.sessions.create_session().await;
     Json(json!({
         "session_id": session.id,
@@ -138,13 +138,12 @@ async fn sse_handler(
     State(context): State<AppContext>,
 ) -> Sse<impl Stream<Item = Result<axum::response::sse::Event, Infallible>>> {
     let receiver = context.state.events.subscribe();
-    
+
     let stream = stream::unfold(receiver, |mut rx| async move {
         match rx.recv().await {
             Ok(event) => {
                 let event_data = serde_json::to_string(&event).unwrap_or_default();
-                let sse_event = axum::response::sse::Event::default()
-                    .data(event_data);
+                let sse_event = axum::response::sse::Event::default().data(event_data);
                 Some((Ok(sse_event), rx))
             }
             Err(_) => None,
@@ -154,7 +153,7 @@ async fn sse_handler(
     Sse::new(stream).keep_alive(
         axum::response::sse::KeepAlive::new()
             .interval(std::time::Duration::from_secs(30))
-            .text("keep-alive")
+            .text("keep-alive"),
     )
 }
 
@@ -275,13 +274,24 @@ async fn submit_jit_transaction(
         marketplace.current_slot + 1
     };
 
-    if !context.state.auctions.read().await.jit_auctions.contains_key(&next_slot) {
-        context.state.start_jit_auction(next_slot, context.config.marketplace.base_fee_sol)
+    if !context
+        .state
+        .auctions
+        .read()
+        .await
+        .jit_auctions
+        .contains_key(&next_slot)
+    {
+        context
+            .state
+            .start_jit_auction(next_slot, context.config.marketplace.base_fee_sol)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
-    context.state.submit_jit_bid(next_slot, req.session_id.clone(), req.bid_amount)
+    context
+        .state
+        .submit_jit_bid(next_slot, req.session_id.clone(), req.bid_amount)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
@@ -326,17 +336,28 @@ async fn submit_aot_transaction(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    if !context.state.auctions.read().await.aot_auctions.contains_key(&req.slot_number) {
-        context.state.start_aot_auction(
-            req.slot_number,
-            context.config.marketplace.base_fee_sol,
-            context.config.auction.aot_default_duration_sec,
-        )
+    if !context
+        .state
+        .auctions
+        .read()
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .aot_auctions
+        .contains_key(&req.slot_number)
+    {
+        context
+            .state
+            .start_aot_auction(
+                req.slot_number,
+                context.config.marketplace.base_fee_sol,
+                context.config.auction.aot_default_duration_sec,
+            )
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
-    context.state.submit_aot_bid(req.slot_number, req.session_id.clone(), req.bid_amount)
+    context
+        .state
+        .submit_aot_bid(req.slot_number, req.session_id.clone(), req.bid_amount)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
@@ -382,16 +403,19 @@ async fn submit_aot_transaction(
 async fn list_transactions(
     State(context): State<AppContext>,
     Query(query): Query<TransactionQuery>,
-) -> Result<Json<Value>, StatusCode>  {
+) -> Result<Json<Value>, StatusCode> {
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(20).min(100).max(1);
     let offset = (page - 1) * limit;
-    
+
     if query.show_all.unwrap_or(false) {
-        let all_transactions = context.state.get_all_transactions_paginated(offset, limit).await;
+        let all_transactions = context
+            .state
+            .get_all_transactions_paginated(offset, limit)
+            .await;
         let total_count = context.state.get_total_transaction_count().await;
         let total_pages = (total_count + limit - 1) / limit;
-        
+
         return Ok(Json(json!({
             "transactions": all_transactions,
             "pagination": {
@@ -412,7 +436,10 @@ async fn list_transactions(
         .state
         .get_session_transactions_paginated(&session_id, offset, limit)
         .await;
-    let total_count = context.state.get_session_transaction_count(&session_id).await;
+    let total_count = context
+        .state
+        .get_session_transaction_count(&session_id)
+        .await;
     let total_pages = (total_count + limit - 1) / limit;
 
     Ok(Json(json!({
@@ -437,11 +464,14 @@ async fn list_all_transactions(
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(20).min(100).max(1);
     let offset = (page - 1) * limit;
-    
-    let all_transactions = context.state.get_all_transactions_paginated(offset, limit).await;
+
+    let all_transactions = context
+        .state
+        .get_all_transactions_paginated(offset, limit)
+        .await;
     let total_count = context.state.get_total_transaction_count().await;
     let total_pages = (total_count + limit - 1) / limit;
-    
+
     Json(json!({
         "transactions": all_transactions,
         "pagination": {

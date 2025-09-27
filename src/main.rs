@@ -10,14 +10,12 @@ use raiku_simulator::{
     rate_limiter::RateLimiter,
     state::AppState,
     transaction::TransactionStatus,
-    InclusionType,
-    TransactionType,
+    InclusionType, TransactionType,
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
-
     tracing::info!("Starting Raiku Simulator");
 
     let config = Config::from_env()?;
@@ -27,6 +25,7 @@ async fn main() -> anyhow::Result<()> {
     let slot_state = state.clone();
     let session_state = state.clone();
 
+    // Background task to advance slot and resolve auctions
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_millis(
             config.marketplace.advance_slot_interval_ms,
@@ -78,13 +77,7 @@ async fn main() -> anyhow::Result<()> {
                     bid
                 );
 
-                if let Some(slot_obj) = slot_state
-                    .marketplace
-                    .write()
-                    .await
-                    .slots
-                    .get_mut(&slot)
-                {
+                if let Some(slot_obj) = slot_state.marketplace.write().await.slots.get_mut(&slot) {
                     slot_obj.reserve(winner.clone(), bid, TransactionType::AoT);
                 }
 
@@ -93,7 +86,9 @@ async fn main() -> anyhow::Result<()> {
                     &winner,
                     slot,
                     bid,
-                    InclusionType::AoT { reserved_slot: slot },
+                    InclusionType::AoT {
+                        reserved_slot: slot,
+                    },
                 )
                 .await;
             }
@@ -104,13 +99,14 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Backgrouud task to cleanup expired sessions
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(300));
 
         loop {
             interval.tick().await;
             session_state.sessions.cleanup_expired_sessions().await;
-            
+
             let session_count = session_state.sessions.get_session_count().await;
             if session_count > 0 {
                 tracing::info!("Active sessions: {}", session_count);
@@ -135,9 +131,12 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Slot time: {}ms", config.marketplace.slot_time_ms);
     tracing::info!("Base fee: {} SOL", config.marketplace.base_fee_sol);
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
-        .await
-        .map_err(|e| anyhow::anyhow!("Server error: {}", e))?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Server error: {}", e))?;
 
     Ok(())
 }

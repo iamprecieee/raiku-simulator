@@ -1,56 +1,56 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast::{channel, Sender, Receiver};
+use tokio::sync::broadcast::{channel, Receiver, Sender};
 
 use crate::{slot::Slot, transaction::Transaction};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum AppEvent {
-    SlotAdvanced { 
-        current_slot: u64 
+    SlotAdvanced {
+        current_slot: u64,
     },
-    SlotsUpdated { 
-        slots: Vec<Slot> 
+    SlotsUpdated {
+        slots: Vec<Slot>,
     },
-    JitAuctionStarted { 
-        slot_number: u64, 
-        min_bid: f64 
-    },
-    AotAuctionStarted { 
-        slot_number: u64, 
+    JitAuctionStarted {
+        slot_number: u64,
         min_bid: f64,
-        ends_at: DateTime<Utc>
     },
-    JitBidSubmitted { 
-        slot_number: u64, 
-        bidder: String, 
-        amount: f64 
+    AotAuctionStarted {
+        slot_number: u64,
+        min_bid: f64,
+        ends_at: DateTime<Utc>,
     },
-    AotBidSubmitted { 
-        slot_number: u64, 
-        bidder: String, 
-        amount: f64 
+    JitBidSubmitted {
+        slot_number: u64,
+        bidder: String,
+        amount: f64,
     },
-    JitAuctionResolved { 
-        slot_number: u64, 
-        winner: String, 
-        winning_bid: f64 
+    AotBidSubmitted {
+        slot_number: u64,
+        bidder: String,
+        amount: f64,
     },
-    AotAuctionResolved { 
-        slot_number: u64, 
-        winner: String, 
-        winning_bid: f64 
+    JitAuctionResolved {
+        slot_number: u64,
+        winner: String,
+        winning_bid: f64,
     },
-    TransactionUpdated { 
-        transaction: Transaction 
+    AotAuctionResolved {
+        slot_number: u64,
+        winner: String,
+        winning_bid: f64,
     },
-    MarketplaceStats { 
+    TransactionUpdated {
+        transaction: Transaction,
+    },
+    MarketplaceStats {
         current_slot: u64,
         active_jit_auctions: usize,
         active_aot_auctions: usize,
-        total_transactions: usize
-    }
+        total_transactions: usize,
+    },
 }
 
 #[derive(Clone)]

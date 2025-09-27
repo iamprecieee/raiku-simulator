@@ -3,11 +3,11 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
 use crate::{
-    auction::AuctionManager, 
-    slot::SlotMarketplace, 
+    auction::AuctionManager,
+    events::{AppEvent, EventBroadcaster},
+    session::SessionManager,
+    slot::SlotMarketplace,
     transaction::Transaction,
-    events::{EventBroadcaster, AppEvent},
-    session::SessionManager
 };
 
 #[derive(Clone)]
@@ -47,7 +47,8 @@ impl AppState {
             .or_insert_with(Vec::new)
             .push(transaction_id);
 
-        self.events.broadcast(AppEvent::TransactionUpdated { transaction });
+        self.events
+            .broadcast(AppEvent::TransactionUpdated { transaction });
     }
 
     pub async fn get_session_transactions(&self, session_id: &str) -> Vec<Transaction> {
@@ -64,7 +65,12 @@ impl AppState {
             .collect()
     }
 
-    pub async fn get_session_transactions_paginated(&self, session_id: &str, offset: u32, limit: u32) -> Vec<Transaction> {
+    pub async fn get_session_transactions_paginated(
+        &self,
+        session_id: &str,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<Transaction> {
         let session_transactions = self.session_transactions.read().await;
         let transaction_ids = session_transactions
             .get(session_id)
@@ -72,7 +78,7 @@ impl AppState {
             .unwrap_or_default();
 
         let transactions = self.transactions.read().await;
-        
+
         transaction_ids
             .iter()
             .skip(offset as usize)
@@ -93,13 +99,17 @@ impl AppState {
         self.transactions.read().await.get(transaction_id).cloned()
     }
 
-    pub async fn get_all_transactions_paginated(&self, offset: u32, limit: u32) -> Vec<Transaction> {
+    pub async fn get_all_transactions_paginated(
+        &self,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<Transaction> {
         let transactions = self.transactions.read().await;
-        
+
         let mut all_transactions: Vec<Transaction> = transactions.values().cloned().collect();
-        
+
         all_transactions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        
+
         all_transactions
             .into_iter()
             .skip(offset as usize)
@@ -116,8 +126,9 @@ impl AppState {
             .write()
             .await
             .insert(transaction_id.to_string(), transaction.clone());
-        
-        self.events.broadcast(AppEvent::TransactionUpdated { transaction });
+
+        self.events
+            .broadcast(AppEvent::TransactionUpdated { transaction });
     }
 
     pub async fn advance_slot(&self) -> u64 {
@@ -127,13 +138,17 @@ impl AppState {
             marketplace.current_slot
         };
 
-        self.events.broadcast(AppEvent::SlotAdvanced { current_slot });
-        
+        self.events
+            .broadcast(AppEvent::SlotAdvanced { current_slot });
+
         let slots: Vec<_> = {
             let marketplace = self.marketplace.read().await;
-            marketplace.slots
+            marketplace
+                .slots
                 .iter()
-                .filter(|(slot_num, _)| **slot_num >= current_slot && **slot_num < current_slot + 50)
+                .filter(|(slot_num, _)| {
+                    **slot_num >= current_slot && **slot_num < current_slot + 50
+                })
                 .map(|(_, slot)| slot.clone())
                 .collect()
         };
@@ -162,7 +177,7 @@ impl AppState {
 
     pub async fn broadcast_stats(&self) {
         let stats = self.get_marketplace_stats().await;
-        
+
         self.events.broadcast(AppEvent::MarketplaceStats {
             current_slot: stats.current_slot,
             active_jit_auctions: stats.active_jit_auctions,
@@ -185,9 +200,14 @@ impl AppState {
         Ok(())
     }
 
-    pub async fn start_aot_auction(&self, slot_number: u64, base_fee: f64, duration_seconds: i64) -> anyhow::Result<()> {
+    pub async fn start_aot_auction(
+        &self,
+        slot_number: u64,
+        base_fee: f64,
+        duration_seconds: i64,
+    ) -> anyhow::Result<()> {
         let ends_at = chrono::Utc::now() + chrono::Duration::seconds(duration_seconds);
-        
+
         {
             let mut auctions = self.auctions.write().await;
             auctions.start_aot_auction(slot_number, base_fee, duration_seconds)?;
@@ -202,7 +222,12 @@ impl AppState {
         Ok(())
     }
 
-    pub async fn submit_jit_bid(&self, slot_number: u64, bidder_id: String, amount: f64) -> anyhow::Result<()> {
+    pub async fn submit_jit_bid(
+        &self,
+        slot_number: u64,
+        bidder_id: String,
+        amount: f64,
+    ) -> anyhow::Result<()> {
         {
             let mut auctions = self.auctions.write().await;
             auctions.submit_jit_bid(slot_number, bidder_id.clone(), amount)?;
@@ -217,7 +242,12 @@ impl AppState {
         Ok(())
     }
 
-    pub async fn submit_aot_bid(&self, slot_number: u64, bidder_id: String, amount: f64) -> anyhow::Result<()> {
+    pub async fn submit_aot_bid(
+        &self,
+        slot_number: u64,
+        bidder_id: String,
+        amount: f64,
+    ) -> anyhow::Result<()> {
         {
             let mut auctions = self.auctions.write().await;
             auctions.submit_aot_bid(slot_number, bidder_id.clone(), amount)?;

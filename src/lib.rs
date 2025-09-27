@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-pub mod slot;
-pub mod transaction;
-pub mod auction;
-pub mod state;
-pub mod events;
-pub mod session;
-pub mod rate_limiter;
-pub mod config;
 pub mod api;
+pub mod auction;
+pub mod config;
+pub mod events;
+pub mod rate_limiter;
+pub mod session;
+pub mod slot;
+pub mod state;
+pub mod transaction;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub enum InclusionType {

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
-use chrono::{DateTime, Utc, Duration};
-use serde::{Serialize, Deserialize};
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,20 +52,23 @@ impl SessionManager {
     pub async fn create_session(&self) -> Session {
         let session_id = uuid::Uuid::new_v4().to_string();
         let session = Session::new(session_id);
-        
-        self.sessions.write().await.insert(session.id.clone(), session.clone());
+
+        self.sessions
+            .write()
+            .await
+            .insert(session.id.clone(), session.clone());
         session
     }
 
     pub async fn get_session(&self, session_id: &str) -> Option<Session> {
         let mut sessions = self.sessions.write().await;
-        
+
         if let Some(session) = sessions.get_mut(session_id) {
             if session.is_expired() {
                 sessions.remove(session_id);
                 return None;
             }
-            
+
             session.touch();
             Some(session.clone())
         } else {

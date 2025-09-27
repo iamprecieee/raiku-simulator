@@ -126,11 +126,7 @@ impl SlotMarketplace {
         let furthest_slot = self.current_slot + 100;
         if !self.slots.contains_key(&furthest_slot) {
             let estimated_time = Utc::now() + Duration::milliseconds(self.slot_time_ms * 100);
-            let slot = Slot::new(
-                furthest_slot,
-                estimated_time,
-                calculate_base_fee(),
-            );
+            let slot = Slot::new(furthest_slot, estimated_time, calculate_base_fee());
             self.slots.insert(furthest_slot, slot);
         }
     }
