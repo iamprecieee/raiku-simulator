@@ -201,10 +201,7 @@ async fn marketplace_status(State(context): State<AppContext>) -> Json<Value> {
 
 async fn list_slots(
     State(context): State<AppContext>,
-    headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
-    let session_id = get_session_from_cookie(&headers, &context.state.sessions).await?;
-    
     let marketplace = context.state.marketplace.read().await;
     let current_slot = marketplace.current_slot;
 
@@ -225,7 +222,6 @@ async fn list_slots(
         .collect();
 
         Ok(Json(json!({  
-            "session_id": session_id, 
             "current_slot": current_slot,
             "slots": slots
         })))
