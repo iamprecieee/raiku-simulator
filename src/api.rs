@@ -144,9 +144,10 @@ async fn create_or_validate_session(
 
 async fn get_session_from_cookie(
     headers: &HeaderMap,
+    query_session_id: Option<&String>,
     sessions: &SessionManager,
 ) -> Result<String, StatusCode> {
-    let session_id = headers
+    let session_id_from_cookie = headers
         .get(header::COOKIE)
         .and_then(|h| h.to_str().ok())
         .and_then(|cookies| {
@@ -154,7 +155,11 @@ async fn get_session_from_cookie(
                 .find(|c| c.trim().starts_with("raiku_session="))
                 .and_then(|c| c.split('=').nth(1))
                 .map(|s| s.to_string())
-        })
+        });
+
+    // Fall back to query parameter
+    let session_id = session_id_from_cookie
+        .or_else(|| query_session_id.cloned())
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     if sessions.validate_session(&session_id).await {
@@ -298,7 +303,7 @@ async fn submit_jit_transaction(
     headers: HeaderMap,
     Json(req): Json<JitBidRequest>,
 ) -> Result<Json<Value>, StatusCode> {
-    let session_id = get_session_from_cookie(&headers, &context.state.sessions).await?;
+    let session_id = get_session_from_cookie(&headers, None, &context.state.sessions).await?;
     let next_slot = {
         let marketplace = context.state.marketplace.read().await;
         marketplace.current_slot + 1
@@ -377,7 +382,7 @@ async fn submit_aot_transaction(
     headers: HeaderMap,
     Json(req): Json<AotBidRequest>,
 ) -> Result<Json<Value>, StatusCode> {
-    let session_id = get_session_from_cookie(&headers, &context.state.sessions).await?;
+    let session_id = get_session_from_cookie(&headers, None, &context.state.sessions).await?;
 
     let current_slot = context.state.get_current_slot().await;
     if req.slot_number < current_slot {
@@ -468,7 +473,7 @@ async fn list_transactions(
     headers: HeaderMap,
     Query(query): Query<TransactionQuery>,
 ) -> Result<Json<Value>, StatusCode> {
-    let session_id = get_session_from_cookie(&headers, &context.state.sessions).await?;
+    let session_id = get_session_from_cookie(&headers, query.session_id.as_ref(), &context.state.sessions).await?;
 
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(20).min(100).max(1);
@@ -574,7 +579,7 @@ async fn get_player_stats(
     State(context): State<AppContext>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
-    let session_id = get_session_from_cookie(&headers, &context.state.sessions).await?;
+    let session_id = get_session_from_cookie(&headers, None, &context.state.sessions).await?;
 
     let mut game = context.state.game.write().await;
     let stats = game.get_or_create_player(session_id.clone());
