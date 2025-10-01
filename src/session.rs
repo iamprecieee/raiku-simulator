@@ -80,9 +80,20 @@ impl SessionManager {
         self.get_session(session_id).await.is_some()
     }
 
-    pub async fn cleanup_expired_sessions(&self) {
+    pub async fn cleanup_expired_sessions(&self) -> Vec<String> {
         let mut sessions = self.sessions.write().await;
-        sessions.retain(|_, session| !session.is_expired());
+        let mut removed = Vec::new();
+        
+        sessions.retain(|session_id, session| {
+            if session.is_expired() {
+                removed.push(session_id.clone());
+                false
+            } else {
+                true
+            }
+        });
+        
+        removed
     }
 
     pub async fn get_session_count(&self) -> usize {

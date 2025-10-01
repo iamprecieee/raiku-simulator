@@ -25,6 +25,12 @@ impl GameManager {
             .or_insert_with(|| PlayerStats::new(session_id))
     }
 
+    pub fn cleanup_players(&mut self, session_ids: &[String]) {
+        for session_id in session_ids {
+            self.player_stats.remove(session_id);
+        }
+    }
+
     pub fn generate_leaderboard(&self) -> Leaderboard {
         let mut by_wins: Vec<_> = self.player_stats.values().collect();
         by_wins.sort_by(|a, b| b.total_auctions_won.partial_cmp(&a.total_auctions_won).unwrap());

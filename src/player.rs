@@ -24,7 +24,7 @@ impl PlayerStats {
     pub fn new(session_id: String) -> Self {
         Self {
             session_id,
-            balance: 1000.0,
+            balance: 100000.0,
             total_sol_spent: 0.0,
             total_auctions_participated: 0,
             total_auctions_won: 0,

@@ -393,7 +393,7 @@ All API endpoints are prefixed with the server host and port (e.g., `http://loca
         ```json
         {
             "session_id": "your_session_id",
-            "balance": 1000.0,
+            "balance": 100000.0,
             "total_sol_spent": 15.5,
             "total_auctions_participated": 50,
             "total_auctions_won": 23,
@@ -448,7 +448,7 @@ All API endpoints are prefixed with the server host and port (e.g., `http://loca
 ## Game Mechanics
 
 ### Player Progression
-- Players start with an initial balance of 1000 SOL
+- Players start with an initial balance of 100000 SOL
 - Bidding in auctions deducts the bid amount from the player's balance
 - Winning auctions awards XP (5-20 XP per win)
 - XP accumulation leads to level-ups (requires level × 100 XP per level)
