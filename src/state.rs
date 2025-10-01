@@ -5,6 +5,9 @@ use tokio::sync::RwLock;
 use crate::{
     auction::AuctionManager,
     events::{AppEvent, EventBroadcaster},
+    game::GameManager,
+    metrics::Leaderboard,
+    player::PlayerStats,
     session::SessionManager,
     slot::SlotMarketplace,
     transaction::Transaction,
@@ -18,6 +21,7 @@ pub struct AppState {
     pub session_transactions: Arc<RwLock<HashMap<String, Vec<String>>>>,
     pub sessions: SessionManager,
     pub events: EventBroadcaster,
+    pub game: Arc<RwLock<GameManager>>,
 }
 
 impl AppState {
@@ -29,6 +33,7 @@ impl AppState {
             session_transactions: Arc::new(RwLock::new(HashMap::new())),
             sessions: SessionManager::new(),
             events: EventBroadcaster::new(),
+            game: Arc::new(RwLock::new(GameManager::new())),
         }
     }
 
@@ -279,13 +284,13 @@ impl AppState {
         result
     }
 
-    pub async fn resolve_ready_aot_auctions(&self, current_slot: u64) -> Vec<(u64, String, f64)> {
+    pub async fn resolve_ready_aot_auctions(&self, current_slot: u64) -> Vec<(u64, String, f64, Vec<String>)> {
         let results = {
             let mut auctions = self.auctions.write().await;
             auctions.resolve_ready_aot(current_slot)
         };
 
-        for (slot_number, winner, winning_bid) in &results {
+        for (slot_number, winner, winning_bid, _) in &results {
             self.events.broadcast(AppEvent::AotAuctionResolved {
                 slot_number: *slot_number,
                 winner: winner.clone(),
@@ -294,6 +299,14 @@ impl AppState {
         }
 
         results
+    }
+
+    pub async fn get_player_stats(&self, session_id: &str) -> Option<PlayerStats> {
+        self.game.read().await.player_stats.get(session_id).cloned()
+    }
+
+    pub async fn get_leaderboard(&self) -> Leaderboard {
+        self.game.read().await.generate_leaderboard()
     }
 }
 

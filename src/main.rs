@@ -69,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
             }
 
             let resolved_aot = slot_state.resolve_ready_aot_auctions(current_slot).await;
-            for (slot, winner, bid) in resolved_aot {
+            for (slot, winner, bid, losers) in resolved_aot {
                 tracing::info!(
                     "AOT auction resolved - Slot: {}, Winner: {}, Bid: {} SOL",
                     slot,
@@ -91,6 +91,15 @@ async fn main() -> anyhow::Result<()> {
                     },
                 )
                 .await;
+
+                let mut game = slot_state.game.write().await;
+                for loser in losers {
+                    if let Some(stats) = game.player_stats.get_mut(&loser) {
+                        stats.mark_auction_resolved(slot);
+                    }
+                    
+                    game.process_auction_loss(&loser);
+                }
             }
 
             if current_slot % 10 == 0 {
@@ -167,6 +176,26 @@ async fn update_transaction_status(
                 slot
             );
             break;
+        }
+    }
+
+    {
+        let mut game = state.game.write().await;
+
+        if let Some(stats) = game.player_stats.get_mut(winner_session) {
+            stats.mark_auction_resolved(slot);
+        }
+
+        game.process_auction_win(winner_session);
+
+        if let Some(stats) = game.player_stats.get(winner_session) {
+            tracing::info!(
+                "Player {} won auction! Level: {}, Wins: {}, Balance: {:.3} SOL",
+                winner_session.chars().take(8).collect::<String>(),
+                stats.level,
+                stats.total_auctions_won,
+                stats.balance
+            );
         }
     }
 }

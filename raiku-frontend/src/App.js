@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Zap, ChevronDown, ChevronLeft, ChevronRight, Users, User } from 'lucide-react';
+import { Zap, ChevronDown, ChevronLeft, ChevronRight, Users, User, Trophy, Award, TrendingUp, Coins, Star } from 'lucide-react';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8080';
 
@@ -30,8 +30,22 @@ const RaikuSimulator = () => {
     active_aot_auctions: 0,
     total_transactions: 0
   });
+  const [playerStats, setPlayerStats] = useState(null);
+  const [leaderboard, setLeaderboard] = useState(null);
+  const [achievementPopup, setAchievementPopup] = useState(null);
   const eventSourceRef = useRef(null);
   const notificationIdRef = useRef(0);
+
+  const fetchWithCredentials = (url, options = {}) => {
+    return fetch(url, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      }
+    });
+  };
 
   useEffect(() => {
     const checkMobile = () => {
@@ -50,10 +64,45 @@ const RaikuSimulator = () => {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 3000);
   }, []);
+
+  const showAchievementUnlocked = useCallback((achievement) => {
+    setAchievementPopup(achievement);
+    setTimeout(() => {
+      setAchievementPopup(null);
+    }, 5000);
+  }, []);
+
+  const fetchPlayerStats = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const response = await fetchWithCredentials(`${API_BASE}/game/stats`);
+      const data = await response.json();
+      
+      setPlayerStats(prevStats => {
+        if (prevStats && data.achievements.length > prevStats.achievements.length) {
+          const newAchievement = data.achievements[data.achievements.length - 1];
+          showAchievementUnlocked(newAchievement);
+        }
+        return data;
+      });
+    } catch (error) {
+      console.error('Failed to fetch player stats:', error);
+    }
+  }, [sessionId, showAchievementUnlocked]);
+
+  const fetchLeaderboard = useCallback(async () => {
+    try {
+      const response = await fetchWithCredentials(`${API_BASE}/game/leaderboard`);
+      const data = await response.json();
+      setLeaderboard(data);
+    } catch (error) {
+      console.error('Failed to fetch leaderboard:', error);
+    }
+  }, []);
   
   const fetchJitAuctions = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/auctions/jit`);
+      const response = await fetchWithCredentials(`${API_BASE}/auctions/jit`);
       const data = await response.json();
       setJitAuctions(data.auctions || []);
     } catch (error) {
@@ -63,7 +112,7 @@ const RaikuSimulator = () => {
 
   const fetchAotAuctions = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/auctions/aot`);
+      const response = await fetchWithCredentials(`${API_BASE}/auctions/aot`);
       const data = await response.json();
       setAotAuctions(data.auctions || []);
     } catch (error) {
@@ -82,7 +131,7 @@ const RaikuSimulator = () => {
         url = `${API_BASE}/transactions?session_id=${sessionId}&page=${page}&limit=20`;
       }
       
-      const response = await fetch(url);
+      const response = await fetchWithCredentials(url);
       const data = await response.json();
       
       setTransactions(data.transactions || []);
@@ -125,12 +174,20 @@ const RaikuSimulator = () => {
         
       case 'JitAuctionResolved':
         fetchJitAuctions();
-        addNotification(`JIT auction won! Slot ${event.slot_number}: ${event.winning_bid} SOL`, 'success');
+        if (event.winner === sessionId) {
+          addNotification(`JIT auction won! Slot ${event.slot_number}: ${event.winning_bid} SOL`, 'success');
+        }
+        fetchPlayerStats();
+        fetchLeaderboard();
         break;
         
       case 'AotAuctionResolved':
         fetchAotAuctions();
-        addNotification(`AOT auction won! Slot ${event.slot_number}: ${event.winning_bid} SOL`, 'success');
+        if (event.winner === sessionId) {
+          addNotification(`AOT auction won! Slot ${event.slot_number}: ${event.winning_bid} SOL`, 'success');
+        }
+        fetchPlayerStats();
+        fetchLeaderboard();
         break;
         
       case 'TransactionUpdated':
@@ -190,18 +247,14 @@ const RaikuSimulator = () => {
 
   const createSession = useCallback(async () => {
     try {
-      const existingSessionId = localStorage.getItem('raiku_session_id');
-      
-      const response = await fetch(`${API_BASE}/sessions`, { 
+      const response = await fetchWithCredentials(`${API_BASE}/sessions`, { 
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: existingSessionId })
       });
       
       const data = await response.json();
       setSessionId(data.session_id);
-      
-      localStorage.setItem('raiku_session_id', data.session_id);
       
       if (data.status === 'validated') {
         addNotification('Session restored successfully!', 'success');
@@ -209,7 +262,6 @@ const RaikuSimulator = () => {
         addNotification('New session created successfully!', 'success');
       }
     } catch (error) {
-      localStorage.removeItem('raiku_session_id');
       addNotification('Failed to create session. Please refresh the page.', 'error');
       console.error('Session creation error:', error);
     }
@@ -220,11 +272,11 @@ const RaikuSimulator = () => {
 
     try {
       const [statusRes, slotsRes, jitRes, aotRes, txRes] = await Promise.all([
-        fetch(`${API_BASE}/marketplace/status`),
-        fetch(`${API_BASE}/marketplace/slots?session_id=${sessionId}`),
-        fetch(`${API_BASE}/auctions/jit`),
-        fetch(`${API_BASE}/auctions/aot`),
-        fetch(`${API_BASE}/transactions?session_id=${sessionId}`)
+        fetchWithCredentials(`${API_BASE}/marketplace/status`),
+        fetchWithCredentials(`${API_BASE}/marketplace/slots`),
+        fetchWithCredentials(`${API_BASE}/auctions/jit`),
+        fetchWithCredentials(`${API_BASE}/auctions/aot`),
+        fetchWithCredentials(`${API_BASE}/transactions`)
       ]);
 
       const status = await statusRes.json();
@@ -238,6 +290,9 @@ const RaikuSimulator = () => {
       setJitAuctions(jitData.auctions || []);
       setAotAuctions(aotData.auctions || []);
       setTransactions(txData.transactions || []);
+      
+      await fetchPlayerStats();
+      await fetchLeaderboard();
     } catch (err) {
       console.error('Initial fetch error:', err);
     }
@@ -269,13 +324,22 @@ const RaikuSimulator = () => {
   }, [activeTab, sessionId, showAllTransactions, fetchTransactions]);
 
   const submitJitBid = async () => {
-    const bidAmount = parseFloat(prompt('Enter JIT bid amount (SOL):') || '0');
+    if (!playerStats) {
+      addNotification('Loading player stats...', 'error');
+      return;
+    }
+
+    const bidAmount = parseFloat(prompt(`Enter JIT bid amount (Balance: ${playerStats.balance.toFixed(3)} SOL):`) || '0');
     if (bidAmount <= 0) return;
 
+    if (bidAmount > playerStats.balance) {
+      addNotification(`Insufficient balance! You have ${playerStats.balance.toFixed(3)} SOL`, 'error');
+      return;
+    }
+
     try {
-      const res = await fetch(`${API_BASE}/transactions/jit`, {
+      const res = await fetchWithCredentials(`${API_BASE}/transactions/jit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
           bid_amount: bidAmount,
@@ -285,21 +349,34 @@ const RaikuSimulator = () => {
       });
 
       if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
-      }
+        if (res.status === 402) {
+          addNotification('Insufficient balance!', 'error');
+        } else {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+      } 
     } catch (err) {
       addNotification('JIT bid failed', 'error');
     }
   };
 
   const submitAotBid = async (slotNumber) => {
-    const bidAmount = parseFloat(prompt('Enter AOT bid amount (SOL):') || '0');
+    if (!playerStats) {
+      addNotification('Loading player stats...', 'error');
+      return;
+    }
+
+    const bidAmount = parseFloat(prompt(`Enter AOT bid amount (Balance: ${playerStats.balance.toFixed(3)} SOL):`) || '0');
     if (bidAmount <= 0) return;
 
+    if (bidAmount > playerStats.balance) {
+      addNotification(`Insufficient balance! You have ${playerStats.balance.toFixed(3)} SOL`, 'error');
+      return;
+    }
+
     try {
-      const res = await fetch(`${API_BASE}/transactions/aot`, {
+      const res = await fetchWithCredentials(`${API_BASE}/transactions/aot`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: sessionId,
           slot_number: slotNumber,
@@ -310,8 +387,12 @@ const RaikuSimulator = () => {
       });
 
       if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
-      }
+        if (res.status === 402) {
+          addNotification('Insufficient balance!', 'error');
+        } else {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+      } 
     } catch (err) {
       addNotification('AOT bid failed', 'error');
     }
@@ -320,7 +401,7 @@ const RaikuSimulator = () => {
   const getSlotStyle = (state) => {
     let backgroundColor = '#666';
     if (typeof state === 'string') {
-      if (state === 'Available') backgroundColor = '#75bd4f';
+      if (state === 'Available') backgroundColor = '#16a085';
       if (state === 'Expired') backgroundColor = '#666';
     } else {
       if (state?.JiTAuction) backgroundColor = '#297cb3';
@@ -409,6 +490,7 @@ const RaikuSimulator = () => {
     { id: 'marketplace', name: 'Marketplace' },
     { id: 'auctions', name: 'Auctions' },
     { id: 'transactions', name: 'Transactions' },
+    { id: 'leaderboard', name: 'Leaderboard' },
   ];
 
   const handleTabChange = (tabId) => {
@@ -418,7 +500,7 @@ const RaikuSimulator = () => {
 
   const getConnectionStatusColor = () => {
     switch (connectionStatus) {
-      case 'connected': return '#75bd4f';
+      case 'connected': return '#16a085';
       case 'error': return 'rgb(169, 56, 56)';
       default: return '#666';
     }
@@ -432,6 +514,57 @@ const RaikuSimulator = () => {
       padding: isMobile ? '12px' : '17px',
       animation: 'fadeIn 0.5s ease-in-out'
     }}>
+      {achievementPopup && (
+        <div style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          backgroundColor: '#8e44ad',
+          padding: '40px',
+          borderRadius: '10px',
+          boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
+          zIndex: 9999,
+          textAlign: 'center',
+          animation: 'achievementPop 0.5s ease-in-out',
+          minWidth: isMobile ? '280px' : '400px'
+        }}>
+          <Award size={60} style={{ color: 'rgb(252, 217, 157)', marginBottom: '20px' }} />
+          <h2 style={{
+            color: 'rgb(252, 217, 157)',
+            fontSize: isMobile ? '28px' : '36px',
+            fontWeight: 'bold',
+            margin: '0 0 10px 0',
+            textTransform: 'uppercase'
+          }}>
+            Achievement Unlocked!
+          </h2>
+          <h3 style={{
+            color: '#75bd4f',
+            fontSize: isMobile ? '22px' : '28px',
+            fontWeight: 'bold',
+            margin: '0 0 10px 0'
+          }}>
+            {achievementPopup.name}
+          </h3>
+          <p style={{
+            color: 'rgb(252, 217, 157)',
+            fontSize: isMobile ? '16px' : '18px',
+            margin: '0 0 15px 0'
+          }}>
+            {achievementPopup.description}
+          </p>
+          <p style={{
+            color: '#75bd4f',
+            fontSize: isMobile ? '18px' : '20px',
+            fontWeight: 'bold',
+            margin: '0'
+          }}>
+            +{achievementPopup.reward_xp} XP
+          </p>
+        </div>
+      )}
+
       <div style={{
         position: 'fixed',
         top: isMobile ? '12px' : '34px',
@@ -449,8 +582,8 @@ const RaikuSimulator = () => {
               padding: isMobile ? '12px 17px' : '17px 26px',
               borderRadius: '5px',
               boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
-              backgroundColor: notification.type === 'success' ? '#75bd4f' : 
-                             notification.type === 'error' ? 'rgb(169, 56, 56)' : '#297cb3',
+              backgroundColor: notification.type === 'success' ? '#16a085' : 
+                             notification.type === 'error' ? 'rgb(169, 56, 56)' : '#16a085',
               color: 'rgb(252, 217, 157)',
               fontWeight: 'bold',
               textTransform: 'uppercase',
@@ -506,9 +639,176 @@ const RaikuSimulator = () => {
         </h1>
       </header>
 
+      {playerStats && (
+        <div style={{
+          backgroundColor: '#34495e',
+          animation: 'bubbleAppear 0.5s ease-in-out',
+          boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
+          minHeight: isMobile ? '100px' : '120px',
+          marginBottom: isMobile ? '24px' : '34px',
+          borderRadius: '5px',
+          padding: isMobile ? '17px' : '26px'
+        }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? '1fr' : 'repeat(2, 1fr)',
+            gap: isMobile ? '17px' : '34px'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '17px'
+            }}>
+              <Coins size={isMobile ? 40 : 50} style={{ color: 'rgb(252, 217, 157)' }} />
+              <div>
+                <div style={{
+                  fontSize: isMobile ? '16px' : '18px',
+                  color: 'rgb(252, 217, 157)',
+                  fontWeight: 'bold',
+                  textTransform: 'uppercase'
+                }}>
+                  Balance
+                </div>
+                <div style={{
+                  fontSize: isMobile ? '28px' : '36px',
+                  color: '#d97706',
+                  fontWeight: 'bolder'
+                }}>
+                  {playerStats.balance.toFixed(3)} SOL
+                </div>
+              </div>
+            </div>
+
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '17px'
+            }}>
+              <Star size={isMobile ? 40 : 50} style={{ color: 'rgb(252, 217, 157)' }} />
+              <div>
+                <div style={{
+                  fontSize: isMobile ? '16px' : '18px',
+                  color: 'rgb(252, 217, 157)',
+                  fontWeight: 'bold',
+                  textTransform: 'uppercase'
+                }}>
+                  Level {playerStats.level}
+                </div>
+                <div style={{
+                  fontSize: isMobile ? '18px' : '22px',
+                  color: '#d97706',
+                  fontWeight: 'bold'
+                }}>
+                  {playerStats.xp} / {playerStats.level * 100} XP
+                </div>
+                <div style={{
+                  width: '100%',
+                  height: '8px',
+                  backgroundColor: 'rgba(169, 56, 56, 0.3)',
+                  borderRadius: '4px',
+                  marginTop: '8px',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{
+                    width: `${(playerStats.xp / (playerStats.level * 100)) * 100}%`,
+                    height: '100%',
+                    backgroundColor: '#d97706',
+                    transition: 'width 0.3s ease'
+                  }} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+            gap: isMobile ? '12px' : '17px',
+            marginTop: isMobile ? '17px' : '26px',
+            borderTop: '3px solid rgb(252, 217, 157)',
+            paddingTop: isMobile ? '17px' : '26px'
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{
+                fontSize: isMobile ? '24px' : '32px',
+                color: '#d97706',
+                fontWeight: 'bolder'
+              }}>
+                {playerStats.total_auctions_won}
+              </div>
+              <div style={{
+                fontSize: isMobile ? '14px' : '16px',
+                color: 'rgb(252, 217, 157)',
+                fontWeight: 'bold',
+                textTransform: 'uppercase'
+              }}>
+                Wins
+              </div>
+            </div>
+
+            <div style={{ textAlign: 'center' }}>
+              <div style={{
+                fontSize: isMobile ? '24px' : '32px',
+                color: '#d97706',
+                fontWeight: 'bolder'
+              }}>
+                {playerStats.total_auctions_participated === 0 
+                  ? 0 
+                  : ((playerStats.total_auctions_won / playerStats.total_auctions_participated) * 100).toFixed(1)
+                }%
+              </div>
+              <div style={{
+                fontSize: isMobile ? '14px' : '16px',
+                color: 'rgb(252, 217, 157)',
+                fontWeight: 'bold',
+                textTransform: 'uppercase'
+              }}>
+                Win Rate
+              </div>
+            </div>
+
+            <div style={{ textAlign: 'center' }}>
+              <div style={{
+                fontSize: isMobile ? '24px' : '32px',
+                color: '#d97706',
+                fontWeight: 'bolder'
+              }}>
+                {playerStats.current_streak}
+              </div>
+              <div style={{
+                fontSize: isMobile ? '14px' : '16px',
+                color: 'rgb(252, 217, 157)',
+                fontWeight: 'bold',
+                textTransform: 'uppercase'
+              }}>
+                Streak
+              </div>
+            </div>
+
+            <div style={{ textAlign: 'center' }}>
+              <div style={{
+                fontSize: isMobile ? '24px' : '32px',
+                color: '#d97706',
+                fontWeight: 'bolder'
+              }}>
+                {playerStats.achievements.length}
+              </div>
+              <div style={{
+                fontSize: isMobile ? '14px' : '16px',
+                color: 'rgb(252, 217, 157)',
+                fontWeight: 'bold',
+                textTransform: 'uppercase'
+              }}>
+                Achievements
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{
         alignContent: 'center',
-        backgroundColor: '#75bd4f',
+        backgroundColor: 'rgb(169, 56, 56)',
         animation: 'bubbleAppear 0.5s ease-in-out',
         boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
         minHeight: isMobile ? '80px' : '102px',
@@ -643,7 +943,7 @@ const RaikuSimulator = () => {
                     style={{
                       width: '100%',
                       padding: '12px 17px',
-                      backgroundColor: activeTab === tab.id ? 'rgb(169, 56, 56)' : '#297cb3',
+                      backgroundColor: activeTab === tab.id ? 'rgb(169, 56, 56)' : '#34495e',
                       color: 'rgb(252, 217, 157)',
                       border: 'none',
                       borderBottom: index < tabs.length - 1 ? '1px solid rgba(40, 40, 40, 0.2)' : 'none',
@@ -662,7 +962,7 @@ const RaikuSimulator = () => {
                     }}
                     onMouseLeave={(e) => {
                       if (activeTab !== tab.id) {
-                        e.target.style.backgroundColor = '#297cb3';
+                        e.target.style.backgroundColor = '#34495e';
                       }
                     }}
                   >
@@ -689,7 +989,7 @@ const RaikuSimulator = () => {
                   borderRadius: '5px',
                   fontWeight: 'bold',
                   textTransform: 'uppercase',
-                  backgroundColor: activeTab === tab.id ? 'rgb(169, 56, 56)' : '#297cb3',
+                  backgroundColor: activeTab === tab.id ? 'rgb(169, 56, 56)' : '#34495e',
                   color: 'rgb(252, 217, 157)',
                   cursor: 'pointer',
                   transition: 'transform 0.3s ease',
@@ -777,7 +1077,7 @@ const RaikuSimulator = () => {
                   <button
                     onClick={submitJitBid}
                     style={{
-                      backgroundColor: '#297cb3',
+                      backgroundColor: '#16a085',
                       color: 'rgb(252, 217, 157)',
                       padding: isMobile ? '17px' : '20px 34px',
                       border: 'none',
@@ -798,7 +1098,7 @@ const RaikuSimulator = () => {
                   </button>
                   
                   <div style={{
-                    backgroundColor: '#297cb3',
+                    backgroundColor: '#34495e',
                     padding: isMobile ? '17px' : '20px',
                     borderRadius: '5px',
                     boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
@@ -820,7 +1120,7 @@ const RaikuSimulator = () => {
                       fontSize: isMobile ? '14px' : '16px'
                     }}>
                       {[
-                        { color: '#75bd4f', label: 'Available' },
+                        { color: '#16a085', label: 'Available' },
                         { color: '#297cb3', label: 'JIT Auction' },
                         { color: 'rgb(169, 56, 56)', label: 'AOT Auction' },
                         { color: '#d97706', label: 'Reserved' },
@@ -886,7 +1186,7 @@ const RaikuSimulator = () => {
                 textAlign: 'center'
               }}>
                 <h3 style={{
-                  color: '#297cb3',
+                  color: '#34495e',
                   fontWeight: 'bolder',
                   textTransform: 'uppercase',
                   margin: '0',
@@ -910,7 +1210,7 @@ const RaikuSimulator = () => {
                 ) : (
                   jitAuctions.map(auction => (
                     <div key={auction.slot_number} style={{
-                      backgroundColor: '#297cb3',
+                      backgroundColor: '#34495e',
                       borderRadius: '5px',
                       boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
                       padding: isMobile ? '17px' : '20px',
@@ -1102,7 +1402,7 @@ const RaikuSimulator = () => {
                     <button
                       onClick={toggleTransactionView}
                       style={{
-                        backgroundColor: showAllTransactions ? '#75bd4f' : '#297cb3',
+                        backgroundColor: showAllTransactions ? '#16a085' : '#16a085',
                         color: 'rgb(252, 217, 157)',
                         padding: isMobile ? '8px 12px' : '10px 16px',
                         border: 'none',
@@ -1142,7 +1442,7 @@ const RaikuSimulator = () => {
                       <>
                         {transactions.map(tx => (
                           <div key={tx.id} style={{
-                            backgroundColor: '#297cb3',
+                            backgroundColor: '#34495e',
                             borderRadius: '5px',
                             boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
                             padding: isMobile ? '17px' : '20px',
@@ -1229,7 +1529,7 @@ const RaikuSimulator = () => {
                               onClick={() => handlePageChange(currentPage - 1)}
                               disabled={!pagination.has_prev}
                               style={{
-                                backgroundColor: pagination.has_prev ? '#297cb3' : '#666',
+                                backgroundColor: pagination.has_prev ? '#16a085' : '#666',
                                 color: 'rgb(252, 217, 157)',
                                 border: 'none',
                                 borderRadius: '5px',
@@ -1259,7 +1559,7 @@ const RaikuSimulator = () => {
                               onClick={() => handlePageChange(currentPage + 1)}
                               disabled={!pagination.has_next}
                               style={{
-                                backgroundColor: pagination.has_next ? '#297cb3' : '#666',
+                                backgroundColor: pagination.has_next ? '#16a085' : '#666',
                                 color: 'rgb(252, 217, 157)',
                                 border: 'none',
                                 borderRadius: '5px',
@@ -1293,7 +1593,307 @@ const RaikuSimulator = () => {
                 </div>
               </div>
             )}
-          </div>
+
+            {activeTab === 'leaderboard' && leaderboard && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '24px' : '34px' }}>
+              <div style={{ textAlign: 'center', animation: 'bubbleAppear 1s ease-in-out' }}>
+                <h2 style={{
+                  color: 'rgb(169, 56, 56)',
+                  fontWeight: 'bolder',
+                  textTransform: 'uppercase',
+                  fontSize: isMobile ? '35px' : '51px',
+                  margin: '0 0 10px 0'
+                }}>
+                  Leaderboard
+                </h2>
+                <p style={{
+                  color: 'rgb(169, 56, 56)',
+                  fontWeight: 'bold',
+                  fontSize: isMobile ? '20px' : '30px',
+                  margin: '0'
+                }}>
+                  Top Players
+                </p>
+              </div>
+
+              <div style={{
+                backgroundColor: 'rgb(252, 217, 157)',
+                borderRadius: '10px',
+                boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
+                animation: 'bubbleAppear 0.5s ease-in-out'
+              }}>
+                <div style={{
+                  padding: isMobile ? '17px' : '26px',
+                  borderBottom: '3px solid rgb(169, 56, 56)',
+                  textAlign: 'center',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '12px'
+                }}>
+                  <Trophy size={isMobile ? 30 : 40} style={{ color: 'rgb(169, 56, 56)' }} />
+                  <h3 style={{
+                    color: 'rgb(169, 56, 56)',
+                    fontWeight: 'bolder',
+                    textTransform: 'uppercase',
+                    margin: '0',
+                    fontSize: isMobile ? '24px' : '32px'
+                  }}>
+                    Most Wins
+                  </h3>
+                </div>
+                <div style={{ padding: isMobile ? '17px' : '26px' }}>
+                  {leaderboard.top_by_wins.length === 0 ? (
+                    <div style={{
+                      textAlign: 'center',
+                      color: 'rgb(169, 56, 56)',
+                      fontWeight: 'bold',
+                      textTransform: 'uppercase',
+                      padding: isMobile ? '20px' : '30px',
+                      fontSize: isMobile ? '18px' : '20px'
+                    }}>
+                      No data yet
+                    </div>
+                  ) : (
+                    leaderboard.top_by_wins.map(entry => (
+                      <div key={entry.session_id} style={{
+                        backgroundColor: entry.session_id === sessionId ? '#d97706' : '#34495e',
+                        borderRadius: '5px',
+                        boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
+                        padding: isMobile ? '17px' : '20px',
+                        marginBottom: isMobile ? '12px' : '17px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '17px' }}>
+                          <div style={{
+                            width: isMobile ? '40px' : '50px',
+                            height: isMobile ? '40px' : '50px',
+                            borderRadius: '50%',
+                            backgroundColor: entry.rank === 1 ? '#FFD700' : entry.rank === 2 ? '#C0C0C0' : entry.rank === 3 ? '#CD7F32' : '#666',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 'bolder',
+                            fontSize: isMobile ? '20px' : '24px',
+                            color: 'white'
+                          }}>
+                            {entry.rank}
+                          </div>
+                          <div>
+                            <div style={{
+                              color: 'rgb(252, 217, 157)',
+                              fontWeight: 'bold',
+                              fontSize: isMobile ? '18px' : '22px'
+                            }}>
+                              {entry.display_name}
+                            </div>
+                            <div style={{
+                              color: 'rgb(252, 217, 157)',
+                              fontSize: isMobile ? '14px' : '16px',
+                              opacity: '0.8'
+                            }}>
+                              Level {entry.level}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div style={{
+                backgroundColor: 'rgb(252, 217, 157)',
+                borderRadius: '10px',
+                boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
+                animation: 'bubbleAppear 0.6s ease-in-out'
+              }}>
+                <div style={{
+                  padding: isMobile ? '17px' : '26px',
+                  borderBottom: '3px solid rgb(169, 56, 56)',
+                  textAlign: 'center',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '12px'
+                }}>
+                  <Coins size={isMobile ? 30 : 40} style={{ color: 'rgb(169, 56, 56)' }} />
+                  <h3 style={{
+                    color: 'rgb(169, 56, 56)',
+                    fontWeight: 'bolder',
+                    textTransform: 'uppercase',
+                    margin: '0',
+                    fontSize: isMobile ? '24px' : '32px'
+                  }}>
+                    Highest Balance
+                  </h3>
+                </div>
+                <div style={{ padding: isMobile ? '17px' : '26px' }}>
+                  {leaderboard.top_by_balance.length === 0 ? (
+                    <div style={{
+                      textAlign: 'center',
+                      color: 'rgb(169, 56, 56)',
+                      fontWeight: 'bold',
+                      textTransform: 'uppercase',
+                      padding: isMobile ? '20px' : '30px',
+                      fontSize: isMobile ? '18px' : '20px'
+                    }}>
+                      No data yet
+                    </div>
+                  ) : (
+                    leaderboard.top_by_balance.map(entry => (
+                      <div key={entry.session_id} style={{
+                        backgroundColor: entry.session_id === sessionId ? '#d97706' : '#34495e',
+                        borderRadius: '5px',
+                        boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
+                        padding: isMobile ? '17px' : '20px',
+                        marginBottom: isMobile ? '12px' : '17px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '17px' }}>
+                          <div style={{
+                            width: isMobile ? '40px' : '50px',
+                            height: isMobile ? '40px' : '50px',
+                            borderRadius: '50%',
+                            backgroundColor: entry.rank === 1 ? '#FFD700' : entry.rank === 2 ? '#C0C0C0' : entry.rank === 3 ? '#CD7F32' : '#666',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 'bolder',
+                            fontSize: isMobile ? '20px' : '24px',
+                            color: 'white'
+                          }}>
+                            {entry.rank}
+                          </div>
+                          <div>
+                            <div style={{
+                              color: 'rgb(252, 217, 157)',
+                              fontWeight: 'bold',
+                              fontSize: isMobile ? '18px' : '22px'
+                            }}>
+                              {entry.display_name}
+                            </div>
+                            <div style={{
+                              color: 'rgb(252, 217, 157)',
+                              fontSize: isMobile ? '14px' : '16px',
+                              opacity: '0.8'
+                            }}>
+                              Level {entry.level}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{
+                          color: '#75bd4f',
+                          fontWeight: 'bolder',
+                          fontSize: isMobile ? '20px' : '28px'
+                        }}>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div style={{
+                backgroundColor: 'rgb(252, 217, 157)',
+                borderRadius: '10px',
+                boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
+                animation: 'bubbleAppear 0.7s ease-in-out'
+              }}>
+                <div style={{
+                  padding: isMobile ? '17px' : '26px',
+                  borderBottom: '3px solid rgb(169, 56, 56)',
+                  textAlign: 'center',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '12px'
+                }}>
+                  <TrendingUp size={isMobile ? 30 : 40} style={{ color: 'rgb(169, 56, 56)' }} />
+                  <h3 style={{
+                    color: 'rgb(169, 56, 56)',
+                    fontWeight: 'bolder',
+                    textTransform: 'uppercase',
+                    margin: '0',
+                    fontSize: isMobile ? '24px' : '32px'
+                  }}>
+                    Best Win Rate
+                  </h3>
+                </div>
+                <div style={{ padding: isMobile ? '17px' : '26px' }}>
+                  {leaderboard.top_by_winrate.length === 0 ? (
+                    <div style={{
+                      textAlign: 'center',
+                      color: 'rgb(169, 56, 56)',
+                      fontWeight: 'bold',
+                      textTransform: 'uppercase',
+                      padding: isMobile ? '20px' : '30px',
+                      fontSize: isMobile ? '18px' : '20px'
+                    }}>
+                      No data yet (min 5 auctions)
+                    </div>
+                  ) : (
+                    leaderboard.top_by_winrate.map(entry => (
+                      <div key={entry.session_id} style={{
+                        backgroundColor: entry.session_id === sessionId ? '#d97706' : '#34495e',
+                        borderRadius: '5px',
+                        boxShadow: '0 4px 7px rgba(40, 40, 40, 1)',
+                        padding: isMobile ? '17px' : '20px',
+                        marginBottom: isMobile ? '12px' : '17px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '17px' }}>
+                          <div style={{
+                            width: isMobile ? '40px' : '50px',
+                            height: isMobile ? '40px' : '50px',
+                            borderRadius: '50%',
+                            backgroundColor: entry.rank === 1 ? '#FFD700' : entry.rank === 2 ? '#C0C0C0' : entry.rank === 3 ? '#CD7F32' : '#666',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 'bolder',
+                            fontSize: isMobile ? '20px' : '24px',
+                            color: 'white'
+                          }}>
+                            {entry.rank}
+                          </div>
+                          <div>
+                            <div style={{
+                              color: 'rgb(252, 217, 157)',
+                              fontWeight: 'bold',
+                              fontSize: isMobile ? '18px' : '22px'
+                            }}>
+                              {entry.display_name}
+                            </div>
+                            <div style={{
+                              color: 'rgb(252, 217, 157)',
+                              fontSize: isMobile ? '14px' : '16px',
+                              opacity: '0.8'
+                            }}>
+                              Level {entry.level}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{
+                          color: '#75bd4f',
+                          fontWeight: 'bolder',
+                          fontSize: isMobile ? '24px' : '32px'
+                        }}>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+      </div>
 
       <style>{`
         @keyframes fadeIn {

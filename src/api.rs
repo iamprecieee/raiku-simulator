@@ -2,8 +2,8 @@ use std::convert::Infallible;
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
-    response::Sse,
+    http::{header, HeaderMap, StatusCode},
+    response::{IntoResponse, Response, Sse},
     routing::{get, post},
     Json, Router,
 };
@@ -13,10 +13,7 @@ use serde_json::{json, Value};
 use tower_http::cors::CorsLayer;
 
 use crate::{
-    config::Config,
-    rate_limiter::{rate_limit_middleware, RateLimiter},
-    state::AppState,
-    transaction::Transaction,
+    config::Config, rate_limiter::{rate_limit_middleware, RateLimiter}, session::SessionManager, state::AppState, transaction::Transaction
 };
 
 #[derive(Clone)]
@@ -27,18 +24,7 @@ pub struct AppContext {
 }
 
 #[derive(Deserialize)]
-pub struct SessionRequest {
-    session_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct SessionQuery {
-    session_id: String,
-}
-
-#[derive(Deserialize)]
 pub struct JitBidRequest {
-    session_id: String,
     bid_amount: f64,
     compute_units: u64,
     data: String,
@@ -46,7 +32,6 @@ pub struct JitBidRequest {
 
 #[derive(Deserialize)]
 pub struct AotBidRequest {
-    session_id: String,
     slot_number: u64,
     bid_amount: f64,
     compute_units: u64,
@@ -85,7 +70,7 @@ pub fn create_api_router(context: AppContext) -> Router {
         ])
         .allow_headers([
             axum::http::header::CONTENT_TYPE,
-            axum::http::header::HeaderName::from_static("x-session-id"),
+            axum::http::header::COOKIE,
             axum::http::header::CACHE_CONTROL,
         ])
         .allow_credentials(true);
@@ -104,6 +89,8 @@ pub fn create_api_router(context: AppContext) -> Router {
         .route("/transactions/all", get(list_all_transactions))
         .route("/transactions/{transaction_id}", get(get_transaction))
         .route("/health", get(health_check))
+        .route("/game/stats", get(get_player_stats))
+        .route("/game/leaderboard", get(get_leaderboard))
         .layer(axum::middleware::from_fn(rate_limit_middleware))
         .layer(axum::Extension(context.rate_limiter.clone()))
         .layer(cors)
@@ -112,26 +99,69 @@ pub fn create_api_router(context: AppContext) -> Router {
 
 async fn create_or_validate_session(
     State(context): State<AppContext>,
-    Json(req): Json<SessionRequest>,
-) -> Json<Value> {
-    if let Some(session_id) = req.session_id {
-        if let Some(session) = context.state.sessions.get_session(&session_id).await {
-            return Json(json!({
-                "session_id": session.id,
-                "status": "validated",
-                "created_at": session.created_at,
-                "expires_at": session.expires_at
-            }));
-        }
-    }
+    headers: HeaderMap,
+) -> Result<Response, StatusCode> {
+    let session_id = headers
+        .get(header::COOKIE)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|cookies| {
+            cookies
+                .split(';')
+                .find(|c| c.trim().starts_with("raiku_session="))
+                .and_then(|c| c.split('=').nth(1))
+        });
 
-    let session = context.state.sessions.create_session().await;
-    Json(json!({
+    let (session, is_new) = if let Some(sid) = session_id {
+        if let Some(sess) = context.state.sessions.get_session(sid).await {
+            (sess, false)
+        } else {
+            (context.state.sessions.create_session().await, true)
+        }
+    } else {
+        (context.state.sessions.create_session().await, true)
+    };
+
+    let cookie_value = format!(
+        "raiku_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+        session.id,
+        86400
+    );
+
+    let body = json!({
         "session_id": session.id,
-        "status": "created",
+        "status": if is_new { "created" } else { "validated" },
         "created_at": session.created_at,
         "expires_at": session.expires_at
-    }))
+    });
+
+    let mut response = Json(body).into_response();
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        cookie_value.parse().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    );
+    Ok(response)
+}
+
+async fn get_session_from_cookie(
+    headers: &HeaderMap,
+    sessions: &SessionManager,
+) -> Result<String, StatusCode> {
+    let session_id = headers
+        .get(header::COOKIE)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|cookies| {
+            cookies.split(';')
+                .find(|c| c.trim().starts_with("raiku_session="))
+                .and_then(|c| c.split('=').nth(1))
+                .map(|s| s.to_string())
+        })
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    if sessions.validate_session(&session_id).await {
+        Ok(session_id)
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
 }
 
 async fn sse_handler(
@@ -171,8 +201,10 @@ async fn marketplace_status(State(context): State<AppContext>) -> Json<Value> {
 
 async fn list_slots(
     State(context): State<AppContext>,
-    Query(query): Query<SessionQuery>,
-) -> Json<Value> {
+    headers: HeaderMap,
+) -> Result<Json<Value>, StatusCode> {
+    let session_id = get_session_from_cookie(&headers, &context.state.sessions).await?;
+    
     let marketplace = context.state.marketplace.read().await;
     let current_slot = marketplace.current_slot;
 
@@ -192,11 +224,11 @@ async fn list_slots(
         })
         .collect();
 
-    Json(json!({
-        "session_id": query.session_id,
-        "current_slot": current_slot,
-        "slots": slots
-    }))
+        Ok(Json(json!({  
+            "session_id": session_id, 
+            "current_slot": current_slot,
+            "slots": slots
+        })))
 }
 
 async fn get_slot(
@@ -267,12 +299,29 @@ async fn list_aot_auctions(State(context): State<AppContext>) -> Json<Value> {
 
 async fn submit_jit_transaction(
     State(context): State<AppContext>,
+    headers: HeaderMap,
     Json(req): Json<JitBidRequest>,
 ) -> Result<Json<Value>, StatusCode> {
+    let session_id = get_session_from_cookie(&headers, &context.state.sessions).await?;
     let next_slot = {
         let marketplace = context.state.marketplace.read().await;
         marketplace.current_slot + 1
     };
+    
+    {
+        let mut game = context.state.game.write().await;
+        let stats = game.get_or_create_player(session_id.clone());
+
+        if !stats.is_balance_sufficient(req.bid_amount) {
+            return Err(StatusCode::PAYMENT_REQUIRED);
+        }
+
+        stats
+            .deduct_balance(req.bid_amount)
+            .map_err(|_| StatusCode::PAYMENT_REQUIRED)?;
+        
+        stats.track_bid(next_slot);
+    }
 
     if !context
         .state
@@ -291,7 +340,7 @@ async fn submit_jit_transaction(
 
     context
         .state
-        .submit_jit_bid(next_slot, req.session_id.clone(), req.bid_amount)
+        .submit_jit_bid(next_slot, session_id.clone(), req.bid_amount)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
@@ -300,13 +349,13 @@ async fn submit_jit_transaction(
         if let Some(slot) = marketplace.slots.get_mut(&next_slot) {
             slot.state = crate::slot::SlotState::JiTAuction {
                 current_bid: req.bid_amount,
-                bidder: req.session_id.clone(),
+                bidder: session_id.clone(),
             };
         }
     }
 
     let transaction = Transaction::jit(
-        req.session_id.clone(),
+        session_id.clone(),
         req.compute_units,
         req.bid_amount,
         req.data,
@@ -315,7 +364,7 @@ async fn submit_jit_transaction(
     let transaction_id = transaction.id.clone();
     context
         .state
-        .add_transaction(req.session_id.clone(), transaction)
+        .add_transaction(session_id.clone(), transaction)
         .await;
 
     Ok(Json(json!({
@@ -329,11 +378,29 @@ async fn submit_jit_transaction(
 
 async fn submit_aot_transaction(
     State(context): State<AppContext>,
+    headers: HeaderMap,
     Json(req): Json<AotBidRequest>,
 ) -> Result<Json<Value>, StatusCode> {
+    let session_id = get_session_from_cookie(&headers, &context.state.sessions).await?;
+
     let current_slot = context.state.get_current_slot().await;
     if req.slot_number < current_slot {
         return Err(StatusCode::BAD_REQUEST);
+    }
+
+    {
+        let mut game = context.state.game.write().await;
+        let stats = game.get_or_create_player(session_id.clone());
+
+        if !stats.is_balance_sufficient(req.bid_amount) {
+            return Err(StatusCode::PAYMENT_REQUIRED);
+        }
+
+        stats
+            .deduct_balance(req.bid_amount)
+            .map_err(|_| StatusCode::PAYMENT_REQUIRED)?;
+        
+        stats.track_bid(req.slot_number);
     }
 
     if !context
@@ -357,7 +424,7 @@ async fn submit_aot_transaction(
 
     context
         .state
-        .submit_aot_bid(req.slot_number, req.session_id.clone(), req.bid_amount)
+        .submit_aot_bid(req.slot_number, session_id.clone(), req.bid_amount)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
@@ -369,8 +436,8 @@ async fn submit_aot_transaction(
                 let ends_at = auction.ends_at;
                 slot.state = crate::slot::SlotState::AoTAuction {
                     highest_bid: req.bid_amount,
-                    highest_bidder: req.session_id.clone(),
-                    bids: vec![(req.session_id.clone(), req.bid_amount)],
+                    highest_bidder: session_id.clone(),
+                    bids: vec![(session_id.clone(), req.bid_amount)],
                     ends_at,
                 };
             }
@@ -378,7 +445,7 @@ async fn submit_aot_transaction(
     }
 
     let transaction = Transaction::aot(
-        req.session_id.clone(),
+        session_id.clone(),
         req.compute_units,
         req.bid_amount,
         req.slot_number,
@@ -388,7 +455,7 @@ async fn submit_aot_transaction(
     let transaction_id = transaction.id.clone();
     context
         .state
-        .add_transaction(req.session_id.clone(), transaction)
+        .add_transaction(session_id.clone(), transaction)
         .await;
 
     Ok(Json(json!({
@@ -402,8 +469,11 @@ async fn submit_aot_transaction(
 
 async fn list_transactions(
     State(context): State<AppContext>,
+    headers: HeaderMap,
     Query(query): Query<TransactionQuery>,
 ) -> Result<Json<Value>, StatusCode> {
+    let session_id = get_session_from_cookie(&headers, &context.state.sessions).await?;
+
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(20).min(100).max(1);
     let offset = (page - 1) * limit;
@@ -431,7 +501,6 @@ async fn list_transactions(
         })));
     }
 
-    let session_id = query.session_id.ok_or(StatusCode::BAD_REQUEST)?;
     let session_transactions = context
         .state
         .get_session_transactions_paginated(&session_id, offset, limit)
@@ -503,4 +572,21 @@ async fn health_check() -> Json<Value> {
         "status": "healthy",
         "timestamp": chrono::Utc::now()
     }))
+}
+
+async fn get_player_stats(
+    State(context): State<AppContext>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, StatusCode> {
+    let session_id = get_session_from_cookie(&headers, &context.state.sessions).await?;
+
+    let mut game = context.state.game.write().await;
+    let stats = game.get_or_create_player(session_id.clone());
+
+    Ok(Json(json!(stats)))
+}
+
+async fn get_leaderboard(State(context): State<AppContext>) -> Json<Value> {
+    let leaderboard = context.state.get_leaderboard().await;
+    Json(json!(leaderboard))
 }
