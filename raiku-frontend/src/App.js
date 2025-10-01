@@ -293,7 +293,7 @@ const RaikuSimulator = () => {
         fetchWithCredentials(`${API_BASE}/marketplace/slots`),
         fetchWithCredentials(`${API_BASE}/auctions/jit`),
         fetchWithCredentials(`${API_BASE}/auctions/aot`),
-        fetchWithCredentials(`${API_BASE}/transactions`)
+        fetchWithCredentials(`${API_BASE}/transactions?session_id=${sessionId}`)
       ]);
 
       const status = await statusRes.json();
