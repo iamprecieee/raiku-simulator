@@ -85,7 +85,7 @@ const RaikuSimulator = () => {
   const fetchPlayerStats = useCallback(async () => {
     if (!sessionId) return;
     try {
-      const response = await fetchWithCredentials(`${API_BASE}/game/stats`);
+      const response = await fetchWithCredentials(`${API_BASE}/game/stats?session_id=${sessionId}`);
       const data = await response.json();
       
       setPlayerStats(prevStats => {
