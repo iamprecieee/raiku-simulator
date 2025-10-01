@@ -97,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
                     if let Some(stats) = game.player_stats.get_mut(&loser) {
                         stats.mark_auction_resolved(slot);
                     }
-                    
+
                     game.process_auction_loss(&loser);
                 }
             }
@@ -111,11 +111,22 @@ async fn main() -> anyhow::Result<()> {
     // Backgrouud task to cleanup expired sessions
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(300));
-
+    
         loop {
             interval.tick().await;
-            session_state.sessions.cleanup_expired_sessions().await;
-
+            
+            let removed_sessions = session_state.sessions.cleanup_expired_sessions().await;
+            
+            if !removed_sessions.is_empty() {
+                let mut game = session_state.game.write().await;
+                game.cleanup_players(&removed_sessions);
+                
+                tracing::info!(
+                    "Cleaned up {} expired sessions and their player stats", 
+                    removed_sessions.len()
+                );
+            }
+    
             let session_count = session_state.sessions.get_session_count().await;
             if session_count > 0 {
                 tracing::info!("Active sessions: {}", session_count);
