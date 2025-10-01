@@ -122,7 +122,7 @@ async fn create_or_validate_session(
     };
 
     let cookie_value = format!(
-        "raiku_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}",
+        "raiku_session={}; Path=/; HttpOnly; SameSite=None; Secure; Max-Age={}",
         session.id,
         86400
     );
