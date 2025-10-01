@@ -578,8 +578,9 @@ async fn health_check() -> Json<Value> {
 async fn get_player_stats(
     State(context): State<AppContext>,
     headers: HeaderMap,
+    Query(query): Query<TransactionQuery>,
 ) -> Result<Json<Value>, StatusCode> {
-    let session_id = get_session_from_cookie(&headers, None, &context.state.sessions).await?;
+    let session_id = get_session_from_cookie(&headers, query.session_id.as_ref(), &context.state.sessions).await?;
 
     let mut game = context.state.game.write().await;
     let stats = game.get_or_create_player(session_id.clone());
