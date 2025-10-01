@@ -64,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
                     current_slot,
                     bid,
                     InclusionType::JiT,
+                    TransactionType::JiT,
                 )
                 .await;
             }
@@ -89,6 +90,7 @@ async fn main() -> anyhow::Result<()> {
                     InclusionType::AoT {
                         reserved_slot: slot,
                     },
+                    TransactionType::AoT,
                 )
                 .await;
 
@@ -167,6 +169,7 @@ async fn update_transaction_status(
     slot: u64,
     winning_bid: f64,
     inclusion_type: InclusionType,
+    transaction_type: TransactionType,
 ) {
     let session_transactions = state.get_session_transactions(winner_session).await;
 
@@ -197,7 +200,7 @@ async fn update_transaction_status(
             stats.mark_auction_resolved(slot);
         }
 
-        game.process_auction_win(winner_session);
+        game.process_auction_win(winner_session, transaction_type);
 
         if let Some(stats) = game.player_stats.get(winner_session) {
             tracing::info!(

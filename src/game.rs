@@ -5,7 +5,7 @@ use rand::Rng;
 
 use crate::{
     metrics::{Achievement, AchievementType, Leaderboard, LeaderboardEntry},
-    player::PlayerStats,
+    player::PlayerStats, TransactionType,
 };
 
 pub struct GameManager {
@@ -85,12 +85,17 @@ impl GameManager {
         }
     }
 
-    pub fn process_auction_win(&mut self, session_id: &str) {
+    pub fn process_auction_win(&mut self, session_id: &str, transaction_type: TransactionType) {
         if let Some(stats) = self.player_stats.get_mut(session_id) {
             stats.total_auctions_won += 1;
             stats.current_streak += 1;
             if stats.current_streak > stats.best_streak {
                 stats.best_streak = stats.current_streak;
+            }
+
+            match transaction_type {
+                TransactionType::JiT => stats.record_jit_win(),
+                TransactionType::AoT => stats.record_aot_win(),
             }
 
             stats.add_xp(rand::rng().random_range(5..20));
@@ -102,12 +107,22 @@ impl GameManager {
     pub fn process_auction_loss(&mut self, session_id: &str) {
         if let Some(stats) = self.player_stats.get_mut(session_id) {
             stats.current_streak = 0;
+            self.check_achievements(session_id);
         }
     }
 
     fn check_achievements(&mut self, session_id: &str) {
         if let Some(stats) = self.player_stats.get_mut(session_id) {
             let mut new_achievements = Vec::new();
+
+            if stats.has_placed_first_bid
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::FirstBid)
+            {
+                new_achievements.push(Achievement::first_bid());
+            }
 
             if stats.total_auctions_won == 1
                 && !stats
@@ -116,6 +131,42 @@ impl GameManager {
                     .any(|a| a.achievement_type == AchievementType::FirstWin)
             {
                 new_achievements.push(Achievement::first_win());
+            }
+
+            if stats.jit_wins >= 1
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::QuickDraw)
+            {
+                new_achievements.push(Achievement::quick_draw());
+            }
+
+            if stats.aot_wins >= 1
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::EarlyBird)
+            {
+                new_achievements.push(Achievement::early_bird());
+            }
+
+            if stats.total_auctions_participated >= 5
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::Participant)
+            {
+                new_achievements.push(Achievement::participant());
+            }
+
+            if stats.level >= 2
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::Beginner)
+            {
+                new_achievements.push(Achievement::beginner());
             }
 
             if stats.total_sol_spent >= 10.0
@@ -127,6 +178,60 @@ impl GameManager {
                 new_achievements.push(Achievement::big_spender());
             }
 
+            if stats.total_auctions_won >= 10
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::Veteran)
+            {
+                new_achievements.push(Achievement::veteran());
+            }
+
+            if stats.current_streak >= 5
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::StreakStarter)
+            {
+                new_achievements.push(Achievement::streak_starter());
+            }
+
+            if stats.has_won_both_auction_types()
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::Diversified)
+            {
+                new_achievements.push(Achievement::diversified());
+            }
+
+            if stats.total_sol_spent >= 50.0
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::HighRoller)
+            {
+                new_achievements.push(Achievement::high_roller());
+            }
+
+            if stats.level >= 5
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::Experienced)
+            {
+                new_achievements.push(Achievement::experienced());
+            }
+
+            if stats.total_auctions_participated >= 50
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::Dedicated)
+            {
+                new_achievements.push(Achievement::dedicated());
+            }
+
             if stats.current_streak >= 20
                 && !stats
                     .achievements
@@ -134,6 +239,60 @@ impl GameManager {
                     .any(|a| a.achievement_type == AchievementType::WinningStreak)
             {
                 new_achievements.push(Achievement::winning_streak());
+            }
+
+            if stats.total_auctions_won >= 50
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::Champion)
+            {
+                new_achievements.push(Achievement::champion());
+            }
+
+            if stats.total_sol_spent >= 100.0
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::BigLeagueSpender)
+            {
+                new_achievements.push(Achievement::big_league_spender());
+            }
+
+            if stats.total_auctions_won >= 100
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::EliteTrader)
+            {
+                new_achievements.push(Achievement::elite_trader());
+            }
+
+            if stats.level >= 10
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::Master)
+            {
+                new_achievements.push(Achievement::master());
+            }
+
+            if stats.current_streak >= 30
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::Legend)
+            {
+                new_achievements.push(Achievement::legend());
+            }
+
+            if stats.has_perfect_record()
+                && !stats
+                    .achievements
+                    .iter()
+                    .any(|a| a.achievement_type == AchievementType::PerfectRecord)
+            {
+                new_achievements.push(Achievement::perfect_record());
             }
 
             for achievement in new_achievements {

@@ -33,8 +33,11 @@ const RaikuSimulator = () => {
   const [playerStats, setPlayerStats] = useState(null);
   const [leaderboard, setLeaderboard] = useState(null);
   const [achievementPopup, setAchievementPopup] = useState(null);
+  const [achievementQueue, setAchievementQueue] = useState([]);
+  const [isShowingAchievement, setIsShowingAchievement] = useState(false);
   const eventSourceRef = useRef(null);
   const notificationIdRef = useRef(0);
+  const queuedAchievementIdsRef = useRef(new Set());
 
   const fetchWithCredentials = (url, options = {}) => {
     return fetch(url, {
@@ -65,11 +68,18 @@ const RaikuSimulator = () => {
     }, 3000);
   }, []);
 
-  const showAchievementUnlocked = useCallback((achievement) => {
-    setAchievementPopup(achievement);
-    setTimeout(() => {
-      setAchievementPopup(null);
-    }, 5000);
+  const queueAchievements = useCallback((achievements) => {
+    const newAchievements = achievements.filter(
+      achievement => !queuedAchievementIdsRef.current.has(achievement.achievement_type)
+    );
+    
+    if (newAchievements.length > 0) {
+      newAchievements.forEach(achievement => {
+        queuedAchievementIdsRef.current.add(achievement.achievement_type);
+      });
+      
+      setAchievementQueue(prev => [...prev, ...newAchievements]);
+    }
   }, []);
 
   const fetchPlayerStats = useCallback(async () => {
@@ -80,15 +90,15 @@ const RaikuSimulator = () => {
       
       setPlayerStats(prevStats => {
         if (prevStats && data.achievements.length > prevStats.achievements.length) {
-          const newAchievement = data.achievements[data.achievements.length - 1];
-          showAchievementUnlocked(newAchievement);
+          const newAchievements = data.achievements.slice(prevStats.achievements.length);
+          queueAchievements(newAchievements);
         }
         return data;
       });
     } catch (error) {
       console.error('Failed to fetch player stats:', error);
     }
-  }, [sessionId, showAchievementUnlocked]);
+  }, [sessionId, queueAchievements]);
 
   const fetchLeaderboard = useCallback(async () => {
     try {
@@ -244,8 +254,14 @@ const RaikuSimulator = () => {
     return eventSource;
   }, [sessionId, addNotification, handleEvent]);
 
+  const sessionCreatedRef = useRef(false);
 
   const createSession = useCallback(async () => {
+    if (sessionCreatedRef.current) {
+      return;
+    }
+    sessionCreatedRef.current = true;
+
     try {
       const response = await fetchWithCredentials(`${API_BASE}/sessions`, { 
         method: 'POST',
@@ -264,6 +280,7 @@ const RaikuSimulator = () => {
     } catch (error) {
       addNotification('Failed to create session. Please refresh the page.', 'error');
       console.error('Session creation error:', error);
+      sessionCreatedRef.current = false;
     }
   }, [addNotification]);
 
@@ -322,6 +339,22 @@ const RaikuSimulator = () => {
       fetchTransactions(1);
     }
   }, [activeTab, sessionId, showAllTransactions, fetchTransactions]);
+
+  useEffect(() => {
+    if (!isShowingAchievement && achievementQueue.length > 0) {
+      const nextAchievement = achievementQueue[0];
+      setAchievementPopup(nextAchievement);
+      setIsShowingAchievement(true);
+      
+      addNotification(`🏆 ${nextAchievement.name}!`, 'success');
+      
+      setTimeout(() => {
+        setAchievementPopup(null);
+        setIsShowingAchievement(false);
+        setAchievementQueue(prev => prev.slice(1));
+      }, 2000);
+    }
+  }, [isShowingAchievement, achievementQueue, addNotification]);
 
   const submitJitBid = async () => {
     if (!playerStats) {

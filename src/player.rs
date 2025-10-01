@@ -18,6 +18,10 @@ pub struct PlayerStats {
     pub achievements: Vec<Achievement>,
     pub participated_slots: HashSet<u64>,
     pub resolved_slots: HashSet<u64>,
+    pub jit_wins: u32,
+    pub aot_wins: u32,
+    pub has_placed_first_bid: bool,
+    pub total_bids_placed: u32,
 }
 
 impl PlayerStats {
@@ -35,6 +39,10 @@ impl PlayerStats {
             achievements: Vec::new(),
             participated_slots: HashSet::new(),
             resolved_slots: HashSet::new(),
+            jit_wins: 0,
+            aot_wins: 0,
+            has_placed_first_bid: false,
+            total_bids_placed: 0,
         }
     }
 
@@ -82,6 +90,8 @@ impl PlayerStats {
 
     pub fn track_bid(&mut self, slot_number: u64) {
         self.participated_slots.insert(slot_number);
+        self.has_placed_first_bid = true;
+        self.total_bids_placed += 1;
     }
 
     pub fn mark_auction_resolved(&mut self, slot_number: u64) {
@@ -89,5 +99,23 @@ impl PlayerStats {
             && self.resolved_slots.insert(slot_number) {
             self.total_auctions_participated += 1;
         }
+    }
+
+    pub fn record_jit_win(&mut self) {
+        self.jit_wins += 1;
+    }
+
+    pub fn record_aot_win(&mut self) {
+        self.aot_wins += 1;
+    }
+
+    pub fn has_won_both_auction_types(&self) -> bool {
+        self.jit_wins > 0 && self.aot_wins > 0
+    }
+
+    pub fn has_perfect_record(&self) -> bool {
+        self.total_auctions_participated >= 10 
+            && self.total_auctions_won >= 10 
+            && self.total_auctions_won == self.total_auctions_participated
     }
 }
