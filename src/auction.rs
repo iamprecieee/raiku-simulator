@@ -210,7 +210,7 @@ impl AuctionManager {
             .and_then(|a| a.resolve())
     }
 
-    pub fn resolve_ready_aot(&mut self, current_slot: u64) -> Vec<(u64, String, f64)> {
+    pub fn resolve_ready_aot(&mut self, current_slot: u64) -> Vec<(u64, String, f64, Vec<String>)> {
         let mut resolved = Vec::new();
         let ready_slots: Vec<u64> = self
             .aot_auctions
@@ -222,7 +222,10 @@ impl AuctionManager {
         for slot in ready_slots {
             if let Some(auction) = self.aot_auctions.remove(&slot) {
                 if let Some((winner, bid)) = auction.resolve() {
-                    resolved.push((slot, winner, bid));
+                    let losers: Vec<String> = auction.bids.iter().map(|(bidder, _, _)| bidder.clone())
+                    .filter(|bidder| bidder != &winner)
+                    .collect();
+                    resolved.push((slot, winner, bid, losers));
                 }
             }
         }

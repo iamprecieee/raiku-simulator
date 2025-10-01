@@ -2,11 +2,11 @@
 
 ## Overview
 
-The `raiku-simulator` is a Rust-based backend application designed to simulate a marketplace for transaction slot auctions. It supports two types of auctions:
+The `raiku-simulator` is a Rust-based backend application designed to simulate a gamified marketplace for transaction slot auctions. It supports two types of auctions:
 - **Just-in-Time (JIT) Auctions**: For transactions that need to be included in the very next available slot.
 - **Ahead-of-Time (AoT) Auctions**: For transactions that are scheduled for future slots, allowing for a bidding period.
 
-The simulator provides a RESTful API for interacting with the marketplace, managing user sessions, submitting bids, and querying the state of slots and transactions. It also includes a Server-Sent Events (SSE) endpoint for real-time updates on marketplace activities.
+The simulator provides a RESTful API for interacting with the marketplace, managing user sessions, submitting bids, and querying the state of slots and transactions. It also includes a Server-Sent Events (SSE) endpoint for real-time updates on marketplace activities, and a gamification layer with player progression, achievements, and leaderboards.
 
 ## Architecture
 
@@ -17,6 +17,7 @@ The `raiku-simulator` is built using the `axum` web framework and `tokio` for as
 - **Shared State Management**: `AppState` acts as the single source of truth, providing controlled access to core components like the marketplace, auction manager, and transaction store.
 - **Event-Driven Communication**: Uses an `EventBroadcaster` to disseminate significant application events, enabling real-time updates to connected clients via SSE.
 - **Modular Design**: The codebase is organized into distinct modules, each responsible for a specific domain (e.g., `api`, `state`, `auction`, `session`, `slot`, `transaction`, `events`, `rate_limiter`, `config`).
+- **Gamification Layer**: Tracks player statistics, achievements, levels, and leaderboards to create an engaging competitive experience.
 
 ## Module Breakdown
 
@@ -27,6 +28,7 @@ The application's entry point. It handles:
 - Setting up the `AppState` and `RateLimiter`.
 - Spawning background `tokio` tasks for:
     - Periodically advancing the slot and resolving JIT/AoT auctions.
+    - Processing auction wins/losses and updating player statistics.
     - Cleaning up expired user sessions.
 - Configuring and starting the `axum` HTTP server.
 
@@ -38,8 +40,9 @@ The library root that re-exports all public modules and defines common enums:
 ### `api.rs`
 Defines the REST API endpoints and their handlers.
 - **`AppContext`**: A struct holding `AppState`, `Config`, and `RateLimiter`, passed as application state to API handlers.
-- **Routes**: Configures all API routes for sessions, marketplace status, slots, auctions, transactions, and health checks.
+- **Routes**: Configures all API routes for sessions, marketplace status, slots, auctions, transactions, game stats, leaderboard, and health checks.
 - **Middleware**: Integrates rate limiting and CORS policies.
+- **Balance Management**: Validates player balances before accepting bids and deducts costs accordingly.
 
 ### `state.rs`
 Manages the global application state and provides methods for interacting with core components.
@@ -50,7 +53,8 @@ Manages the global application state and provides methods for interacting with c
     - `HashMap<String, Vec<String>>`: Maps session IDs to their transaction IDs.
     - `SessionManager`: Manages user sessions.
     - `EventBroadcaster`: Publishes application events.
-- **Core Logic**: Provides high-level methods for adding/updating transactions, advancing slots, retrieving marketplace statistics, starting auctions, and submitting bids.
+    - `GameManager`: Manages player statistics, progression, and achievements.
+- **Core Logic**: Provides high-level methods for adding/updating transactions, advancing slots, retrieving marketplace statistics, starting auctions, and submitting bids, and accessing player/leaderboard data.
 
 ### `auction.rs`
 Implements the logic for Just-in-Time (JIT) and Ahead-of-Time (AoT) auctions.
@@ -63,6 +67,35 @@ Implements the logic for Just-in-Time (JIT) and Ahead-of-Time (AoT) auctions.
 Manages user sessions for API interaction.
 - **`Session`**: Represents an individual user session with an ID, creation time, last active time, and expiration time.
 - **`SessionManager`**: Provides functionality to create new sessions, retrieve and validate existing sessions (extending their expiry on activity), and clean up expired sessions.
+
+### `game.rs`
+Manages the gamification layer of the simulator.
+- **`GameManager`**: Central manager for all player statistics and game mechanics.
+- **`Player Tracking`**: Maintains a map of session IDs to PlayerStats.
+- **`Leaderboard Generation`**: Creates rankings by total wins, balance, and win rate.
+- **`Auction Processing`**: Handles win/loss outcomes, updating player stats, streaks, and XP.
+- **`Achievement System`**: Checks and awards achievements based on player milestones.
+
+### `player.rs`
+Defines player statistics and progression mechanics.
+- **`PlayerStats`**: Tracks comprehensive player data including:
+    - Balance (SOL) for bidding
+    - Total SOL spent
+    - Auction participation and win counts
+    - Level and XP progression
+    - Current and best win streaks
+    - Earned achievements
+    - Participated and resolved slot tracking
+- **`Balance Management`**: Methods for checking, deducting, and incrementing player balance.
+- **`Progression System`**: XP accumulation and level-up logic.
+- **`Win Rate Calculation`**: Computes percentage of auctions won.
+
+### `metrics.rs`
+Defines achievement types and leaderboard structures.
+- **`Achievement`**: Contains achievement metadata including type, name, description, and XP rewards.
+- **`AchievementType`**: Enum of available achievements (FirstWin, BigSpender, WinningStreak).
+- **`LeaderboardEntry`**: Represents a player's position in a leaderboard category.
+- **`Leaderboard`**: Contains top players by wins, balance, and win rate.
 
 ### `events.rs`
 Provides a publish-subscribe mechanism for application events.
@@ -350,6 +383,95 @@ All API endpoints are prefixed with the server host and port (e.g., `http://loca
             "timestamp": "timestamp"
         }
         ```
+
+### Game & Player Information
+
+-   `GET /game/stats`
+    -   **Description**: Retrieves the current player's statistics including balance, level, wins, streaks, and achievements.
+    -   **Authentication**: Requires valid `raiku_session` cookie.
+    -   **Response**:
+        ```json
+        {
+            "session_id": "your_session_id",
+            "balance": 1000.0,
+            "total_sol_spent": 15.5,
+            "total_auctions_participated": 50,
+            "total_auctions_won": 23,
+            "level": 5,
+            "current_streak": 3,
+            "best_streak": 12,
+            "xp": 450,
+            "achievements": [
+                {
+                    "achievement_type": "FirstWin",
+                    "name": "First Win!",
+                    "description": "Win your first auction",
+                    "reward_xp": 25
+                }
+            ],
+            "participated_slots": [124, 125, 126],
+            "resolved_slots": [124, 125]
+        }
+        ```
+
+-   `GET /game/leaderboard`
+    -   **Description**: Retrieves the global leaderboard with top players by wins, balance, and win rate.
+    -   **Response**:
+        ```json
+        {
+            "top_by_wins": [
+                {
+                    "session_id": "abc123",
+                    "display_name": "Player abc123",
+                    "rank": 1,
+                    "level": 10
+                }
+            ],
+            "top_by_balance": [...],
+            "top_by_winrate": [...],
+            "last_updated": "timestamp"
+        }
+        ```
+
+### Health Check
+
+-   `GET /health`
+    -   **Description**: Simple endpoint to check the health of the API.
+    -   **Response**:
+        ```json
+        {
+            "status": "healthy",
+            "timestamp": "timestamp"
+        }
+        ```
+
+## Game Mechanics
+
+### Player Progression
+- Players start with an initial balance of 1000 SOL
+- Bidding in auctions deducts the bid amount from the player's balance
+- Winning auctions awards XP (5-20 XP per win)
+- XP accumulation leads to level-ups (requires level × 100 XP per level)
+- Losing bidders in AoT auctions have their bids refunded automatically
+
+### Achievements
+Players can earn achievements for various milestones:
+- **First Win**: Win your first auction (rewards 0-50 XP)
+- **Big Spender**: Spend 10 SOL in total (rewards 51-100 XP)
+- **On Fire**: Win 20 auctions in a row (rewards 101-150 XP)
+
+### Win Streaks
+- Current streak increases with each consecutive auction win
+- Streak resets to 0 on any auction loss
+- Best streak is tracked separately and never decreases
+
+### Leaderboards
+Global rankings are maintained for:
+- **Top by Wins**: Players with the most auction wins
+- **Top by Balance**: Players with the highest current balance
+- **Top by Win Rate**: Players with the best win percentage (minimum 5 auctions required)
+
+Each leaderboard displays the top 10 players with their rank and level.
 
 ## 5. Setup and Running
 
