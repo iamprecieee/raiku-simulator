@@ -25,6 +25,7 @@ pub struct AppContext {
 
 #[derive(Deserialize)]
 pub struct JitBidRequest {
+    session_id: Option<String>,
     bid_amount: f64,
     compute_units: u64,
     data: String,
@@ -32,6 +33,7 @@ pub struct JitBidRequest {
 
 #[derive(Deserialize)]
 pub struct AotBidRequest {
+    session_id: Option<String>,
     slot_number: u64,
     bid_amount: f64,
     compute_units: u64,
@@ -303,7 +305,7 @@ async fn submit_jit_transaction(
     headers: HeaderMap,
     Json(req): Json<JitBidRequest>,
 ) -> Result<Json<Value>, StatusCode> {
-    let session_id = get_session_from_cookie(&headers, None, &context.state.sessions).await?;
+    let session_id = get_session_from_cookie(&headers, req.session_id.as_ref(), &context.state.sessions).await?;
     let next_slot = {
         let marketplace = context.state.marketplace.read().await;
         marketplace.current_slot + 1
@@ -382,7 +384,7 @@ async fn submit_aot_transaction(
     headers: HeaderMap,
     Json(req): Json<AotBidRequest>,
 ) -> Result<Json<Value>, StatusCode> {
-    let session_id = get_session_from_cookie(&headers, None, &context.state.sessions).await?;
+    let session_id = get_session_from_cookie(&headers, req.session_id.as_ref(), &context.state.sessions).await?;
 
     let current_slot = context.state.get_current_slot().await;
     if req.slot_number < current_slot {
