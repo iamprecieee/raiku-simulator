@@ -1,9 +1,10 @@
 use std::env;
 
+use dotenvy::dotenv;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Config {
+pub struct GlobalConfig {
     pub server: ServerConfig,
     pub marketplace: MarketplaceConfig,
     pub auction: AuctionConfig,
@@ -12,13 +13,13 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ServerConfig {
     pub host: String,
-    pub port: u16,
-    pub cors_origins: Vec<String>,
+    pub port: u32,
+    pub cors_allowed_origins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MarketplaceConfig {
-    pub slot_time_ms: i64,
+    pub slot_duration_ms: i64,
     pub base_fee_sol: f64,
     pub advance_slot_interval_ms: u64,
 }
@@ -28,11 +29,11 @@ pub struct AuctionConfig {
     pub aot_default_duration_sec: i64,
 }
 
-impl Config {
+impl GlobalConfig {
     pub fn from_env() -> anyhow::Result<Self> {
-        dotenv::dotenv().ok();
+        dotenv().ok();
 
-        Ok(Config {
+        Ok(GlobalConfig {
             server: ServerConfig {
                 host: env::var("SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
                 port: env::var("PORT")
@@ -40,14 +41,15 @@ impl Config {
                     .unwrap_or_else(|_| "8080".to_string())
                     .parse()
                     .unwrap_or(8080),
-                cors_origins: env::var("CORS_ORIGINS")
+                cors_allowed_origins: env::var("CORS_ORIGINS")
                     .unwrap_or_else(|_| "http://localhost:3000".to_string())
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .collect(),
             },
+
             marketplace: MarketplaceConfig {
-                slot_time_ms: env::var("SLOT_TIME_MS")
+                slot_duration_ms: env::var("SLOT_DURATION_MS")
                     .unwrap_or_else(|_| "400".to_string())
                     .parse()
                     .unwrap_or(400),
@@ -60,11 +62,12 @@ impl Config {
                     .parse()
                     .unwrap_or(400),
             },
+
             auction: AuctionConfig {
                 aot_default_duration_sec: env::var("AOT_DURATION_SEC")
                     .unwrap_or_else(|_| "35".to_string())
                     .parse()
-                    .unwrap_or(5),
+                    .unwrap_or(35),
             },
         })
     }

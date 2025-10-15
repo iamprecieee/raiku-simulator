@@ -1,26 +1,13 @@
-use serde::{Deserialize, Serialize};
-
-pub mod api;
-pub mod auction;
+pub mod app;
 pub mod config;
-pub mod events;
-pub mod game;
-pub mod metrics;
-pub mod player;
-pub mod rate_limiter;
-pub mod session;
-pub mod slot;
-pub mod state;
-pub mod transaction;
+pub mod managers;
+pub mod middleware;
+pub mod models;
+pub mod routes;
+pub mod services;
+pub mod utils;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub enum InclusionType {
-    JiT,
-    AoT { reserved_slot: u64 },
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub enum TransactionType {
-    JiT,
-    AoT,
-}
+pub const INITIAL_PLAYER_BALANCE: f64 = 100_000.0;
+pub const MAX_COMPUTE_UNITS_PER_SLOT: u64 = 48_000_000;
+pub const MIN_AOT_BID_INCREMENT: f64 = 0.001;
+pub const JIT_PREMIUM_MULTIPLIER: f64 = 1.05;
