@@ -1,8 +1,10 @@
 /target
 Cargo.lock
 *.log
-.vscode/
 .env
 node_modules/
 /build
 package-lock.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
